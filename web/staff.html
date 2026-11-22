@@ -150,13 +150,13 @@
   // ── Views ─────────────────────────────────────────────────────────────
   const owner = () => me.role === 'owner';
   function tabs() {
-    const t = [['schedule', 'Schedule'], ['rent', 'Booth rent'], ['profile', 'My profile']];
+    const t = [['schedule', 'Schedule'], ['earnings', 'Earnings'], ['rent', 'Booth rent'], ['profile', 'My profile']];
     if (owner()) t.push(['team', 'Team']);
     return `<div class="tabs" role="group" aria-label="Sections">${t.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`;
   }
   async function render() {
     err = err || '';
-    const body = await ({ schedule: schedule, rent: rent, profile: profile, team: team }[tab])();
+    const body = await ({ schedule: schedule, earnings: earnings, rent: rent, profile: profile, team: team }[tab])();
     view.innerHTML = tabs() + body;
   }
 
@@ -289,6 +289,84 @@
   }
   const calUrl = () => `${C.supabaseUrl}/functions/v1/calendar?token=${me.calendar_token}`;
 
+  // ── Earnings ──────────────────────────────────────────────────────────
+  let earnWeek = null;
+  const SRC = { app: 'Online', booksy: 'Booksy', walkin: 'Walk-in' };
+  const STATUS = { confirmed: 'Booked', done: 'Done', noshow: 'No-show', cancelled: 'Cancelled' };
+  async function fetchBookings(fromDay, toDay) {
+    const { data, error } = await sb.from('bookings')
+      .select('starts_at, barber_id, client_name, status, source, deposit_cents, deposit_paid, services(name, price_cents)')
+      .gte('starts_at', T.toUtc(fromDay, 0, shop.timezone).toISOString())
+      .lt('starts_at', T.toUtc(toDay, 0, shop.timezone).toISOString())
+      .order('starts_at');
+    if (error) throw error;
+    return data;
+  }
+  async function teamNames() {
+    if (!owner()) return { [me.id]: me.name };
+    const { data } = await sb.from('barbers').select('id, name');
+    return Object.fromEntries((data || []).map(x => [x.id, x.name]));
+  }
+  async function earnings() {
+    const today = T.todayIn(shop.timezone);
+    earnWeek = earnWeek || T.weekStart(today);
+    const end = T.addDays(earnWeek, 7);
+    let rows, names, rent;
+    try {
+      [rows, names, rent] = await Promise.all([fetchBookings(earnWeek, end), teamNames(),
+        sb.rpc('rent_statement', { p_shop: C.shopId, p_week_start: earnWeek }).then(r => r.data || [])]);
+    } catch (_) { return '<section class="panel"><div class="error">Couldn’t load earnings. Refresh to try again.</div></section>'; }
+    const per = {};
+    for (const id of Object.keys(names)) per[id] = { done: 0, services: 0, noshow: 0, upcoming: 0, deposits: 0 };
+    for (const r of rows) {
+      const p = per[r.barber_id] || (per[r.barber_id] = { done: 0, services: 0, noshow: 0, upcoming: 0, deposits: 0 });
+      if (r.status === 'done') { p.done++; p.services += r.services.price_cents; }
+      if (r.status === 'noshow') p.noshow++;
+      if (r.status === 'confirmed') p.upcoming++;
+      if (r.deposit_paid && r.status !== 'cancelled') p.deposits += r.deposit_cents;
+    }
+    const rentBy = Object.fromEntries(rent.map(r => [r.barber_id, r]));
+    const ids = Object.keys(per).sort((a, b) => (names[a] || '').localeCompare(names[b] || ''));
+    const isThis = earnWeek === T.weekStart(today);
+    const tot = ids.reduce((t, id) => ({ done: t.done + per[id].done, services: t.services + per[id].services, deposits: t.deposits + per[id].deposits }), { done: 0, services: 0, deposits: 0 });
+    return `<section class="panel">
+      <div class="wkhead"><div><div class="label">Earnings</div><h2>${isThis ? 'This week' : earnWeek === T.addDays(T.weekStart(today), -7) ? 'Last week' : 'Week of ' + T.label(earnWeek, { month: 'short', day: 'numeric' })}</h2>
+        <div class="hint">${T.label(earnWeek, { weekday: 'short', month: 'short', day: 'numeric' })} – ${T.label(T.addDays(earnWeek, 6), { weekday: 'short', month: 'short', day: 'numeric' })}</div></div>
+        <div class="mini" style="margin:0"><button data-earn="-7">← Earlier</button>${isThis ? '' : '<button data-earn="7">Later →</button>'}</div></div>
+      ${owner() ? `<div class="stats"><div class="stat"><div class="n">${tot.done}</div><div class="k">cuts done</div></div>
+        <div class="stat"><div class="n">${money(tot.services)}</div><div class="k">in services</div></div>
+        <div class="stat"><div class="n">${money(tot.deposits)}</div><div class="k">deposits to shop</div></div></div>` : ''}
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Barber</th><th>Cuts done</th><th>Services</th><th>No-shows</th><th>Deposits</th><th>Rent</th></tr></thead><tbody>
+      ${ids.map(id => { const p = per[id], r = rentBy[id];
+        return `<tr><td><b>${esc(names[id] || 'Barber')}</b>${p.upcoming ? `<br><span class="hint">${p.upcoming} still booked</span>` : ''}</td>
+          <td class="price">${p.done}</td><td class="price">${money(p.services)}</td><td class="price">${p.noshow}</td><td class="price">${money(p.deposits)}</td>
+          <td>${r ? `<span class="${r.balance_cents >= 0 ? 'chip ok' : 'chip warn'}">${r.balance_cents > 0 ? 'Shop owes ' + money(r.balance_cents) : r.balance_cents < 0 ? 'Owes ' + money(-r.balance_cents) : 'Even'}</span>` : '<span class="hint">Owner</span>'}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <p class="hint" style="margin:0">Services use menu prices for appointments marked Done. Tips, cash extras and cuts not entered in the app aren’t included.</p>
+      <div class="row"><button class="btn ghost" data-csv="week">Download this week (spreadsheet)</button><button class="btn ghost" data-csv="year">Download ${today.slice(0, 4)} so far</button></div>
+      <p class="hint" style="margin:0">Spreadsheets open in Excel or Google Sheets and import into QuickBooks Online.</p>
+    </section>`;
+  }
+  async function downloadCsv(kind) {
+    const today = T.todayIn(shop.timezone);
+    const from = kind === 'year' ? today.slice(0, 4) + '-01-01' : earnWeek;
+    const to = kind === 'year' ? T.addDays(today, 1) : T.addDays(earnWeek, 7);
+    const [rows, names] = await Promise.all([fetchBookings(from, to), teamNames()]);
+    const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const fmtD = iso => new Intl.DateTimeFormat('en-CA', { timeZone: shop.timezone }).format(new Date(iso));
+    const fmtT = iso => new Date(iso).toLocaleTimeString('en-US', { timeZone: shop.timezone, hour: 'numeric', minute: '2-digit' });
+    const lines = [['Date', 'Time', 'Barber', 'Client', 'Service', 'Price', 'Status', 'Booked through', 'Deposit paid to shop'].join(',')];
+    for (const r of rows) lines.push([fmtD(r.starts_at), fmtT(r.starts_at), names[r.barber_id] || '', r.client_name, r.services.name,
+      (r.services.price_cents / 100).toFixed(2), STATUS[r.status], SRC[r.source] || r.source,
+      r.deposit_paid && r.status !== 'cancelled' ? (r.deposit_cents / 100).toFixed(2) : '0.00'].map(q).join(','));
+    const blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fades4change-${owner() ? 'shop' : me.name.split(' ')[0].toLowerCase()}-${kind === 'year' ? today.slice(0, 4) : earnWeek}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
   async function saveProfile() {
     const phone = document.getElementById('p-phone').value.trim(), carrier = document.getElementById('p-carrier').value || null;
     const specialty = document.getElementById('p-spec').value.trim() || null;
@@ -329,6 +407,13 @@
     else if ('addclose' in d) { adding = false; addErr = ''; }
     else if (d.tab) { tab = d.tab; adding = false; }
     else if (d.day) day = d.day;
+    else if (d.earn) earnWeek = T.addDays(earnWeek, +d.earn);
+    else if (d.csv) {
+      t.disabled = true;
+      try { await downloadCsv(d.csv); } catch (_) { err = 'Couldn’t build the spreadsheet. Try again.'; }
+      t.disabled = false;
+      if (!err) return;
+    }
     else if (d.status) { const { error } = await sb.from('bookings').update({ status: d.status }).eq('id', d.id); if (error) err = 'Couldn’t update that booking.'; }
     else if (d.deposit) { const { error } = await sb.rpc('mark_deposit_paid', { p_booking: d.id, p_paid: d.deposit === 'yes' }); if (error) err = 'Couldn’t update the deposit.'; }
     else if (d.settle) { const { error } = await sb.rpc('mark_rent_settled', { p_barber: d.settle, p_week_start: d.week }); if (error) err = 'Couldn’t mark that week.'; }
