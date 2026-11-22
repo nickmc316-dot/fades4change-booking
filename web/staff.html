@@ -49,6 +49,12 @@
   const EMAIL_TEXT_OK = ['verizon', 'tmobile', 'uscellular', 'googlefi'];
 
   let shop, me, tab = 'schedule', day, authMode = 'signin', msg = '', err = '', openDetail = null;
+  let services = [], adding = false, addErr = '';
+  const ADD_ERRORS = {
+    slot_taken: 'That barber already has someone at that time. Check the time, or cancel the other appointment first.',
+    name_required: 'Add the client’s name.',
+    not_allowed: 'You can only add appointments to your own chair.',
+  };
 
   // ── Auth ──────────────────────────────────────────────────────────────
   function renderAuth() {
@@ -90,6 +96,27 @@
       }
     }
     if (e.target.id === 'profileform') { e.preventDefault(); await saveProfile(); }
+    if (e.target.id === 'addform') {
+      e.preventDefault();
+      const v = id => document.getElementById(id) ? document.getElementById(id).value : '';
+      const d = v('ad-day'), t = v('ad-time');
+      addErr = '';
+      if (!v('ad-name').trim()) addErr = ADD_ERRORS.name_required;
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}/.test(t)) addErr = 'Pick a day and time.';
+      if (addErr) return render();
+      const [hh, mm] = t.split(':').map(Number);
+      const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Adding…';
+      const { error } = await sb.rpc('staff_add_booking', {
+        p_barber: owner() ? v('ad-barber') : me.id, p_service: v('ad-service'),
+        p_starts_at: T.toUtc(d, hh * 60 + mm, shop.timezone).toISOString(),
+        p_client_name: v('ad-name'), p_source: v('ad-source'), p_client_phone: v('ad-phone'), p_cut_notes: v('ad-notes'),
+      });
+      if (error) {
+        const code = Object.keys(ADD_ERRORS).find(k => (error.message || '').includes(k));
+        addErr = code ? ADD_ERRORS[code] : 'Couldn’t add that appointment. Try again.';
+      } else { adding = false; day = d; msg = ''; }
+      render();
+    }
   });
 
   // ── Session start ─────────────────────────────────────────────────────
@@ -113,6 +140,7 @@
       sb.from('shops').select('*').eq('id', C.shopId).single(),
     ]);
     me = b.data; shop = s.data;
+    services = (await sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort')).data || [];
     day = T.todayIn(shop.timezone);
     document.getElementById('signout').hidden = false;
     document.getElementById('who').textContent = me.name + (me.role === 'owner' ? ' · Owner' : '');
@@ -150,11 +178,28 @@
     }
     const live = list.filter(a => a.status !== 'cancelled' && a.status !== 'noshow');
     const booked = live.reduce((t, a) => t + a.services.price_cents, 0);
-    const chip = a => ({
-      confirmed: (a.deposit_paid ? '<span class="chip ok">Deposit paid</span>' : '<span class="chip warn">Deposit not paid yet</span>'),
+    const srcChip = a => a.source === 'booksy' ? '<span class="chip info">From Booksy</span>' : a.source === 'walkin' ? '<span class="chip info">Walk-in</span>' : '';
+    const chip = a => srcChip(a) + ({
+      confirmed: a.source !== 'app' ? '' : (a.deposit_paid ? '<span class="chip ok">Deposit paid</span>' : '<span class="chip warn">Deposit not paid yet</span>'),
       done: '<span class="chip ok">Done</span>', noshow: '<span class="chip bad">No-show</span>', cancelled: '<span class="chip info">Cancelled</span>',
     }[a.status]);
-    return `<section class="panel">
+    const chairs = owner() ? (team || []) : [me];
+    const addForm = !adding ? `<button class="btn primary" data-addopen style="flex:none">+ Add appointment</button>` : `<section class="panel">
+      <div><div class="label">Booksy, walk-in or phone booking</div><h2>Add an appointment</h2>
+        <p class="hint" style="margin:4px 0 0">Blocks this time on the online booking page right away.</p></div>
+      <form id="addform" class="list" novalidate>
+        <div class="field"><label for="ad-source">Where it was booked</label><select id="ad-source"><option value="booksy">Booksy</option><option value="walkin">Walk-in / phone</option></select></div>
+        ${owner() ? `<div class="field"><label for="ad-barber">Barber</label><select id="ad-barber">${chairs.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div>` : ''}
+        <div class="field"><label for="ad-service">Service</label><select id="ad-service">${services.map(x => `<option value="${x.id}">${esc(x.name)} · ${x.minutes} min</option>`).join('')}</select></div>
+        <div class="row"><div class="field" style="flex:1;min-width:140px"><label for="ad-day">Day</label><input id="ad-day" type="date" value="${day}"></div>
+          <div class="field" style="flex:1;min-width:120px"><label for="ad-time">Time</label><input id="ad-time" type="time" step="300" value="10:00"></div></div>
+        <div class="field"><label for="ad-name">Client name</label><input id="ad-name" maxlength="80" autocomplete="off"></div>
+        <div class="field"><label for="ad-phone">Client phone (optional)</label><input id="ad-phone" type="tel" autocomplete="off"></div>
+        <div class="field"><label for="ad-notes">Cut notes (optional)</label><input id="ad-notes" maxlength="500" autocomplete="off"></div>
+        <div class="error" role="alert">${esc(addErr)}</div>
+        <div class="row"><button class="btn ghost" type="button" data-addclose>Cancel</button><button class="btn primary" type="submit">Add to schedule</button></div>
+      </form></section>`;
+    return addForm + `<section class="panel">
       <div><div class="label">${owner() ? 'Whole shop' : 'Your chair'}</div><h2>${day === today ? 'Today' : T.label(day, { weekday: 'long', month: 'short', day: 'numeric' })}</h2></div>
       <div class="days">${days}</div>
       <div class="stats">
@@ -280,7 +325,9 @@
       err = ''; msg = 'If that email is on the team, a reset link is on its way.'; return renderAuth();
     }
     err = ''; msg = '';
-    if (d.tab) tab = d.tab;
+    if ('addopen' in d) { adding = true; addErr = ''; }
+    else if ('addclose' in d) { adding = false; addErr = ''; }
+    else if (d.tab) { tab = d.tab; adding = false; }
     else if (d.day) day = d.day;
     else if (d.status) { const { error } = await sb.from('bookings').update({ status: d.status }).eq('id', d.id); if (error) err = 'Couldn’t update that booking.'; }
     else if (d.deposit) { const { error } = await sb.rpc('mark_deposit_paid', { p_booking: d.id, p_paid: d.deposit === 'yes' }); if (error) err = 'Couldn’t update the deposit.'; }
