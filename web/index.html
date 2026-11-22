@@ -45,7 +45,36 @@
     }
     shop = a.data; services = b.data; barbers = c.data;
     s.day = T.todayIn(shop.timezone);
+    payOnline = !!(await sb.rpc('online_payments_enabled', { p_shop: C.shopId })).data;
+    const q = new URLSearchParams(location.search);
+    if (q.get('paid') || q.get('payfail')) return afterPayment(q.get('paid') || q.get('payfail'), !!q.get('paid'));
     render();
+  }
+
+  // Coming back from Clover's payment page.
+  async function afterPayment(id, success) {
+    history.replaceState(null, '', location.pathname);
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem('f4c-pending') || 'null'); } catch (_) {}
+    const summary = saved && saved.id === id ? saved : null;
+    if (!success) {
+      view.innerHTML = `<section class="panel"><h2>Payment didn’t go through</h2>
+        <p class="hint" style="margin:0">Your card wasn’t charged. We held your time for a few minutes, but it will open back up if it isn’t paid.</p>
+        <div class="row"><button class="btn primary" data-again>Start over</button></div></section>`;
+      return;
+    }
+    view.innerHTML = '<section class="panel"><div class="empty">Confirming your payment…</div></section>';
+    let st = null;
+    for (let i = 0; i < 10; i++) {
+      const { data } = await sb.rpc('booking_payment_status', { p_booking: id });
+      st = data && data[0];
+      if (st && st.deposit_paid) break;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    if (st && st.deposit_paid && summary) { s.result = summary; s.step = 4; return render(); }
+    view.innerHTML = `<section class="panel">${st && st.deposit_paid ? '<div class="done-mark" aria-hidden="true">✓</div><h2>You’re booked.</h2>' : '<h2>Payment received</h2>'}
+      <p class="hint" style="margin:0">${st && st.deposit_paid ? 'Your deposit is paid. We’ll email a reminder the day of.' : 'Clover is still confirming it. You’ll get your reminder email the day of. If you don’t, call or text the shop.'}</p>
+      <div class="row"><button class="btn primary" data-again>Book another</button></div></section>`;
   }
 
   async function loadBusy() {
@@ -102,9 +131,9 @@
         <div class="field"><label for="f-phone">Mobile number</label><input id="f-phone" type="tel" autocomplete="tel" placeholder="(864) 555-1234" value="${esc(s.phone)}"></div>
         <div class="field"><label for="f-email">Email</label><input id="f-email" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(s.email)}"><span class="hint">We email your reminder the day of your appointment.</span></div>
         <div class="field"><label for="f-notes">How do you get it cut? (optional)</label><textarea id="f-notes" maxlength="500" placeholder="e.g. Mid fade, #2 on the sides, scissor top">${esc(s.notes)}</textarea></div>
-        <div class="box"><span><b>${money(shop.deposit_cents)} deposit</b><br><span class="hint">Pay it at the shop for now. It comes off your total.</span></span><span class="price">${money(shop.deposit_cents)}</span></div>
+        <div class="box"><span><b>${money(shop.deposit_cents)} deposit</b><br><span class="hint">${payOnline ? 'Pay by card on the next screen. It comes off your total.' : 'Pay it at the shop for now. It comes off your total.'}</span></span><span class="price">${money(shop.deposit_cents)}</span></div>
         <div class="error" role="alert">${esc(s.error)}</div>
-        <div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-book>Book it</button></div>`;
+        <div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-book>${payOnline ? 'Pay ' + money(shop.deposit_cents) + ' & book' : 'Book it'}</button></div>`;
     } else {
       const r = s.result;
       h += `<div class="done-mark" aria-hidden="true">✓</div>
@@ -115,6 +144,7 @@
     view.innerHTML = h + '</section>';
   }
 
+  let payOnline = false;
   const errors = {
     slot_taken: 'That time just got taken. Go back and pick another.',
     outside_hours: 'That time is outside shop hours. Pick another.',
@@ -134,7 +164,7 @@
     else if (d.day) { s.day = d.day; s.start = null; await loadBusy(); }
     else if (d.start) { s.start = +d.start; }
     else if ('next' in d) { s.step++; s.error = ''; }
-    else if ('back' in d) { s.step--; s.error = ''; if (s.step === 2) await loadBusy(); }
+    else if ('back' in d) { s.step--; s.error = ''; s.pendingId = null; if (s.step === 2) await loadBusy(); }
     else if ('again' in d) { s = { step: 0, svc: null, barber: null, day: T.todayIn(shop.timezone), start: null, name: '', phone: '', email: '', notes: '', result: null, error: '' }; }
     else if ('book' in d) {
       if (!s.name.trim()) s.error = errors.name_required;
@@ -142,10 +172,15 @@
       else if (!/^\S+@\S+\.\S+$/.test(s.email.trim())) s.error = 'Enter your email so we can send your reminder.';
       else {
         t.disabled = true; t.textContent = 'Booking…';
-        const { data, error } = await sb.rpc('create_booking', {
-          p_shop: C.shopId, p_service: s.svc, p_barber: s.barber, p_starts_at: T.toUtc(s.day, s.start, shop.timezone).toISOString(),
-          p_client_name: s.name, p_client_phone: s.phone, p_client_email: s.email, p_cut_notes: s.notes,
-        });
+        // If the payment page failed to open, retry payment on the same held booking.
+        let data = s.pendingId || null, error = null;
+        if (!data) {
+          ({ data, error } = await sb.rpc('create_booking', {
+            p_shop: C.shopId, p_service: s.svc, p_barber: s.barber, p_starts_at: T.toUtc(s.day, s.start, shop.timezone).toISOString(),
+            p_client_name: s.name, p_client_phone: s.phone, p_client_email: s.email, p_cut_notes: s.notes,
+          }));
+          if (!error && payOnline) s.pendingId = data;
+        }
         if (error) {
           const code = Object.keys(errors).find(k => (error.message || '').includes(k));
           s.error = code ? errors[code] : 'Something went wrong booking that. Try again, or call the shop.';
@@ -153,7 +188,14 @@
           s.result = { id: data, name: s.name.trim(), email: s.email.trim(), svc: svc().name,
             barber: s.barber ? barberName(s.barber) : 'the first available barber',
             when: T.label(s.day, { weekday: 'long', month: 'short', day: 'numeric' }) + ' at ' + T.fmt(s.start) };
-          s.step = 4;
+          if (payOnline) {
+            t.textContent = 'Opening secure payment…';
+            try { sessionStorage.setItem('f4c-pending', JSON.stringify(s.result)); } catch (_) {}
+            const { data: p, error: perr } = await sb.functions.invoke('pay', { body: { booking_id: data } });
+            if (!perr && p && p.href) { location.href = p.href; return; }
+            s.error = 'We couldn’t open the payment page. Your time is held for a few minutes. Try again, or call the shop.';
+            s.result = null;
+          } else s.step = 4;
         }
       }
     } else return;
