@@ -1,0 +1,367 @@
+<title>Fades 4 Change Booking</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one narrow app column, phone-first; a view switch flips between the client booking flow and the barber's day sheet. */
+:root{
+  --bg:#f3f4f6; --surface:#ffffff; --ink:#141a24; --muted:#5d6675; --line:#dde1e7;
+  --accent:#c8312b; --accent-ink:#ffffff; --steel:#3c424b; --ok:#1f7a4d; --warn:#a86400; --soft:#eef1f5;
+  --display:"Archivo",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f131a; --surface:#171d27; --ink:#e9edf3; --muted:#9aa4b3; --line:#2a3240;
+  --accent:#e5534b; --accent-ink:#ffffff; --steel:#b9c0ca; --ok:#4cc38a; --warn:#e0a33a; --soft:#1e2631; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f131a; --surface:#171d27; --ink:#e9edf3; --muted:#9aa4b3; --line:#2a3240;
+  --accent:#e5534b; --accent-ink:#ffffff; --steel:#b9c0ca; --ok:#4cc38a; --warn:#e0a33a; --soft:#1e2631; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.app{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px}
+.pole{width:10px;height:34px;border-radius:5px;background:repeating-linear-gradient(135deg,var(--accent) 0 6px,var(--surface) 6px 12px,var(--steel) 12px 18px,var(--surface) 18px 24px);border:1px solid var(--line)}
+.brand h1{font-size:22px;font-weight:800}
+.brand small{display:block;color:var(--muted);font-size:12px;font-family:var(--body)}
+.switch{display:flex;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px}
+.switch button{border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:7px 14px;border-radius:999px;cursor:pointer}
+.switch button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.demo{font-size:12px;color:var(--muted);background:var(--soft);border:1px dashed var(--line);border-radius:8px;padding:8px 12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.label{font:600 11px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.steps{display:flex;gap:6px}
+.steps span{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.steps span.on{background:var(--accent)}
+.list{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;font:inherit}
+.opt:hover{border-color:var(--steel)}
+.opt[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.opt b{font-weight:600}
+.opt .sub{color:var(--muted);font-size:13px}
+.price{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.days{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.day{flex:0 0 auto;min-width:56px;text-align:center;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:8px 6px;cursor:pointer;font:inherit}
+.day small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.day strong{font-family:var(--display);font-size:18px}
+.day[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.day[aria-pressed="true"] small{color:var(--bg)}
+.day:disabled{opacity:.4;cursor:not-allowed}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}
+.slot{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:9px 4px;font:500 14px var(--mono);cursor:pointer}
+.slot[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.slot:disabled{text-decoration:line-through;color:var(--muted);background:var(--soft);cursor:not-allowed}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-weight:600;font-size:13px}
+.field input,.field textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.field textarea{min-height:64px;resize:vertical}
+.hint{font-size:12px;color:var(--muted)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:12px 16px;font:600 15px var(--body);cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);flex:1}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.summary{background:var(--soft);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px}
+.summary dt{color:var(--muted)} .summary dd{margin:0;font-weight:500}
+.deposit{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.done-mark{width:48px;height:48px;border-radius:50%;background:var(--ok);color:#fff;display:grid;place-items:center;font-size:24px;font-weight:700}
+.timeline{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.timeline div{display:flex;gap:10px}
+.timeline .t{font-family:var(--mono);color:var(--muted);min-width:92px}
+/* barber view */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.stat .n{font:800 22px var(--display);font-variant-numeric:tabular-nums}
+.stat .k{font-size:12px;color:var(--muted)}
+.appt{display:grid;grid-template-columns:62px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.appt:first-child{border-top:0}
+.appt .time{font:500 14px var(--mono);color:var(--muted);padding-top:2px}
+.appt .who{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.appt .who b{font-weight:600}
+.notes{font-size:13px;background:var(--soft);border-radius:8px;padding:6px 10px;margin-top:6px}
+.notes span{font-family:var(--mono);font-size:12px;color:var(--steel)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{font:600 11px var(--body);padding:3px 8px;border-radius:999px;border:1px solid currentColor}
+.chip.ok{color:var(--ok)} .chip.warn{color:var(--warn)} .chip.bad{color:var(--accent)} .chip.info{color:var(--steel)}
+.mini{display:flex;gap:6px;margin-top:8px}
+.mini button{font:600 12px var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:5px 10px;cursor:pointer}
+.empty{color:var(--muted);text-align:center;padding:16px 0}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font:600 11px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
+.tbl td{padding:10px 8px 10px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl .total td{font-weight:700;border-bottom:0}
+.stmt{display:flex;flex-direction:column;gap:4px;padding:12px 0;border-top:1px solid var(--line)}
+.wk{display:flex;flex-direction:column}
+.wk .label{padding-bottom:6px}
+.bal{font:700 17px var(--display)} .bal.pos{color:var(--ok)} .bal.neg{color:var(--warn)}
+.linkbtn{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;font:inherit;font-size:12px;cursor:pointer;align-self:flex-start}
+.field select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.reset{background:none;border:0;color:var(--muted);text-decoration:underline;font:inherit;font-size:12px;cursor:pointer;align-self:center}
+@media (max-width:420px){.stats{grid-template-columns:1fr 1fr}.stats .stat:last-child{grid-column:span 2}}
+@media (prefers-reduced-motion:no-preference){.panel{animation:in .2s ease-out}@keyframes in{from{transform:translateY(4px)}to{transform:none}}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="pole" aria-hidden="true"></div><div><h1>Fades 4 Change</h1><small>Barbershop / Barberia · 311 Spartanburg Hwy, Suite A, Wellford, SC</small></div></div>
+    <div class="switch" role="group" aria-label="View">
+      <button id="v-client" aria-pressed="true">Client</button>
+      <button id="v-barber" aria-pressed="false">Barber</button>
+    </div>
+  </header>
+  <div class="demo">Demo build. Services, prices, barbers and hours are the shop's real ones. The clients and appointments already on the schedule are made-up examples. Nothing is charged and no texts are sent.</div>
+  <main id="view"></main>
+  <button class="reset" id="reset">Reset demo data</button>
+</div>
+
+<script>
+(function(){
+const SERVICES=[
+  {id:'adult',name:'Adult service',min:40,price:50,sub:''},
+  {id:'kids',name:'Child haircut',min:30,price:40,sub:''},
+];
+const BARBERS=[{id:'danny',name:'Danny Orellana',sub:'Owner'},{id:'cory',name:'Cory Clippers',sub:'Barber'},{id:'sasha',name:'Sasha Hamrick',sub:'Barber'},{id:'brandon',name:'Brandon Lopez',sub:'Barber'},{id:'any',name:'First available',sub:'Fastest way in'}];
+const CHAIRS=['danny','cory','sasha','brandon'];
+const OPEN=6*60, CLOSE=21*60, STEP=30, DEPOSIT=10, CLOSED_DAY=-1, APPT_ONLY_DAY=0; // open daily; Sunday is appointment only
+const KEY='f4c-demo-v3';
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const fmtT=m=>{let h=Math.floor(m/60),mm=m%60,ap=h>=12?'pm':'am';h=h%12||12;return h+':'+pad(mm)+ap};
+const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const today=new Date();today.setHours(0,0,0,0);
+function nextOpen(d){while(d.getDay()===CLOSED_DAY)d=addDays(d,1);return d}
+function weekStart(){return addDays(today,-((today.getDay()+6)%7))}
+const inWk=(day,ws)=>day>=ymd(ws)&&day<ymd(addDays(ws,7));
+const inWeek=day=>inWk(day,weekStart());
+
+function seed(){
+  const d0=ymd(nextOpen(new Date(today))), d1=ymd(nextOpen(addDays(nextOpen(new Date(today)),1)));
+  const s=(day,start,svc,barber,name,phone,notes,status)=>({id:Math.random().toString(36).slice(2),day,start,svc,barber,name,phone,notes,status,deposit:true,example:true});
+  const base=[
+    s(d0,7*60,'adult','danny','Jordan R. (example)','(555) 201-4410','Mid fade, #2 on top blended, sharp lineup','done'),
+    s(d0,9*60,'adult','cory','Chris P. (example)','(555) 388-0192','Scissor top, #3 sides, clean beard line','confirmed'),
+    s(d0,10*60+30,'kids','sasha','Eli (example)','(555) 761-3304','#4 all over, squared back','confirmed'),
+    s(d0,12*60,'adult','brandon','Andre W. (example)','(555) 447-9021','High skin fade, part on left','confirmed'),
+    s(d0,15*60,'adult','danny','Sam T. (example)','(555) 902-1187','Low taper, textured top','confirmed'),
+    s(d0,18*60+30,'adult','cory','Luis M. (example)','(555) 330-6675','Burst fade, leave length on top','confirmed'),
+    s(d1,8*60,'adult','sasha','Nate K. (example)','(555) 118-2290','#1 sides, finger length top','confirmed'),
+    s(d1,17*60,'kids','brandon','Tyler B. (example)','(555) 645-7733','Low taper, leave the curls','confirmed'),
+  ];
+  const arr=base;
+  const names=['Marco','Devin','Josh','Kevin','Ray','Omar','Ty','Ben','Carlos','Mike','Isaiah','Jalen','Drew','Cam'];let k=0;
+  const fill=(ws,targets)=>{for(const id of CHAIRS){let have=arr.filter(a=>a.barber===id&&inWk(a.day,ws)).length,i=0;
+    while(have<targets[id]&&i<90){const day=ymd(addDays(ws,i%7));const start=(7+((i*3+CHAIRS.indexOf(id)*2)%13))*60;i++;
+      if(arr.some(a=>a.barber===id&&a.day===day&&Math.abs(a.start-start)<60))continue;
+      arr.push(s(day,start,i%4===0?'kids':'adult',id,names[k++%names.length]+' (example)','(555) 000-0000','',day<ymd(today)?'done':'confirmed'));have++}}};
+  fill(weekStart(),{danny:6,cory:9,sasha:11,brandon:13});
+  fill(addDays(weekStart(),-7),{danny:5,cory:11,sasha:18,brandon:16});
+  return arr;
+}
+let data;
+function fresh(){const lw=ymd(addDays(weekStart(),-7));return {appts:seed(),rent:150,settled:{[lw+'|sasha']:{at:weekStart().toLocaleDateString(undefined,{month:'short',day:'numeric'}),ack:true}}}}
+function load(){try{const r=localStorage.getItem(KEY);if(r){data=JSON.parse(r);if(data&&data.appts&&data.settled)return}}catch(e){}data=fresh()}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
+load();
+
+const svc=id=>SERVICES.find(s=>s.id===id);
+const view=document.getElementById('view');
+let mode='client';
+let b={step:0,svc:null,barber:null,day:null,start:null,name:'',phone:'',notes:''};
+let barberDay=ymd(nextOpen(new Date(today)));
+let calBarber=null, copied=false, viewer='danny', openDetail=null;
+const mine=a=>viewer==='danny'||a.barber===viewer;
+
+function busy(barber,day,start,len){
+  return data.appts.some(a=>a.barber===barber&&a.day===day&&a.status!=='noshow'&&start<a.start+svc(a.svc).min&&a.start<start+len);
+}
+function assign(day,start,len){
+  return CHAIRS.find(id=>!busy(id,day,start,len));
+}
+function slotsFor(day,barberId,len){
+  const out=[];const now=new Date();const isToday=day===ymd(now);const nowM=now.getHours()*60+now.getMinutes();
+  for(let m=OPEN;m+len<=CLOSE;m+=STEP){
+    if(m%30!==0)continue;
+    const past=isToday&&m<=nowM+30;
+    const free=barberId==='any'?!!assign(day,m,len):!busy(barberId,day,m,len);
+    out.push({m,ok:free&&!past});
+  }
+  return out;
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function stepsBar(){return '<div class="steps" aria-hidden="true">'+[0,1,2,3].map(i=>'<span class="'+(i<=b.step?'on':'')+'"></span>').join('')+'</div>'}
+
+function renderClient(){
+  let h='<section class="panel">';
+  if(b.step<4)h+=stepsBar();
+  if(b.step===0){
+    h+='<div><div class="label">Step 1 of 4</div><h2>What are we doing today?</h2></div><div class="list">'+
+      SERVICES.map(s=>`<button class="opt" data-svc="${s.id}" aria-pressed="${b.svc===s.id}"><span><b>${s.name}</b><br><span class="sub">${s.min} min${s.sub?' · '+s.sub:''}</span></span><span class="price">$${s.price}</span></button>`).join('')+'</div>';
+  }else if(b.step===1){
+    h+='<div><div class="label">Step 2 of 4</div><h2>Pick your barber</h2></div><div class="list">'+
+      BARBERS.map(x=>`<button class="opt" data-barber="${x.id}" aria-pressed="${b.barber===x.id}"><span><b>${x.name}</b><br><span class="sub">${x.sub}</span></span></button>`).join('')+'</div>'+
+      '<div class="row"><button class="btn ghost" data-back>Back</button></div>';
+  }else if(b.step===2){
+    const len=svc(b.svc).min;
+    if(!b.day)b.day=ymd(nextOpen(new Date(today)));
+    let days='';for(let i=0;i<10;i++){const d=addDays(today,i);const closed=d.getDay()===CLOSED_DAY;const k=ymd(d);
+      days+=`<button class="day" data-day="${k}" aria-pressed="${b.day===k}" ${closed?'disabled title="Closed Mondays"':''}><small>${i===0?'Today':d.toLocaleDateString(undefined,{weekday:'short'})}</small><strong>${d.getDate()}</strong></button>`}
+    const sl=slotsFor(b.day,b.barber,len);
+    const apptOnly=new Date(b.day+'T00:00').getDay()===APPT_ONLY_DAY;
+    h+=`<div><div class="label">Step 3 of 4</div><h2>When works?</h2></div><div class="days">${days}</div>`+
+      (apptOnly?'<div class="demo">Sunday is appointment only. No walk-ins.</div>':'')+
+      (sl.some(s=>s.ok)?`<div class="slots">${sl.map(s=>`<button class="slot" data-start="${s.m}" ${s.ok?'':'disabled'} aria-pressed="${b.start===s.m}">${fmtT(s.m)}</button>`).join('')}</div>`:'<div class="empty">Fully booked this day. Try another.</div>')+
+      `<div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-next ${b.start==null?'disabled':''}>Continue</button></div>`;
+  }else if(b.step===3){
+    const s=svc(b.svc);const bn=BARBERS.find(x=>x.id===b.barber).name;
+    const dd=new Date(b.day+'T00:00');
+    h+=`<div><div class="label">Step 4 of 4</div><h2>Lock it in</h2></div>
+      <dl class="summary"><dt>Service</dt><dd>${s.name} · $${s.price}</dd><dt>Barber</dt><dd>${bn}</dd><dt>When</dt><dd>${dd.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})} at ${fmtT(b.start)}</dd></dl>
+      <div class="field"><label for="f-name">Your name</label><input id="f-name" autocomplete="name" value="${esc(b.name)}"></div>
+      <div class="field"><label for="f-phone">Mobile number</label><input id="f-phone" type="tel" autocomplete="tel" placeholder="(555) 123-4567" value="${esc(b.phone)}"><span class="hint">We text your confirmation and reminders here.</span></div>
+      <div class="field"><label for="f-notes">How do you get it cut? (optional)</label><textarea id="f-notes" placeholder="e.g. Mid fade, #2 on the sides, scissor top">${esc(b.notes)}</textarea><span class="hint">Saved so your barber knows next time too.</span></div>
+      <div class="deposit"><span><b>$${DEPOSIT} deposit</b><br><span class="hint">Paid to Fades 4 Change. Comes off your total. Refunded if you cancel 24h ahead.</span></span><span class="price">$${DEPOSIT}.00</span></div>
+      <div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-book>Pay deposit &amp; book</button></div>
+      <div class="hint" id="err" role="alert"></div>`;
+  }else{
+    const a=b.result;const s=svc(a.svc);const bn=BARBERS.find(x=>x.id===a.barber).name;
+    const dd=new Date(a.day+'T00:00');const ds=dd.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'});
+    h+=`<div class="done-mark" aria-hidden="true">✓</div><div><h2>You're booked, ${esc(a.name.split(' ')[0])}.</h2><p class="hint" style="margin:4px 0 0">${s.name} with ${bn}, ${ds} at ${fmtT(a.start)}.</p></div>
+      <div><div class="label">Texts you'll get</div><div class="timeline">
+        <div><span class="t">Now</span><span>Confirmation + $${DEPOSIT} receipt</span></div>
+        <div><span class="t">Day before</span><span>"See you tomorrow at ${fmtT(a.start)}. Reply C to cancel."</span></div>
+        <div><span class="t">2 hrs before</span><span>"Your chair is ready at ${fmtT(a.start)}."</span></div>
+      </div></div>
+      <div class="row"><button class="btn primary" data-again>Book another</button><button class="btn ghost" data-see>See the barber's side</button></div>`;
+  }
+  view.innerHTML=h+'</section>';
+}
+
+function renderBarber(){
+  const day=barberDay;const owner=viewer==='danny';const list=data.appts.filter(a=>a.day===day&&mine(a)).sort((x,y)=>x.start-y.start);
+  const live=list.filter(a=>a.status!=='noshow');
+  const rev=live.reduce((t,a)=>t+svc(a.svc).price,0);
+  const weekEnd=ymd(addDays(today,7));
+  const week=data.appts.filter(a=>mine(a)&&a.day>=ymd(today)&&a.day<weekEnd&&a.status!=='noshow');
+  const deposits=data.appts.filter(a=>mine(a)&&a.deposit&&a.status!=='noshow').length*DEPOSIT;
+  let days='';for(let i=0;i<7;i++){const d=addDays(today,i);const k=ymd(d);const n=data.appts.filter(a=>a.day===k&&mine(a)).length;
+    days+=`<button class="day" data-bday="${k}" aria-pressed="${k===day}"><small>${i===0?'Today':d.toLocaleDateString(undefined,{weekday:'short'})}</small><strong>${d.getDate()}</strong><small>${d.getDay()===CLOSED_DAY?'closed':n+' appt'+(n===1?'':'s')}</small></button>`}
+  const chipFor=a=>{
+    if(a.status==='done')return '<span class="chip ok">Done · paid</span>';
+    if(a.status==='noshow')return '<span class="chip bad">No-show · kept $'+DEPOSIT+'</span>';
+    const first=BARBERS.find(x=>x.id===a.barber).name.split(' ')[0];
+    return '<span class="chip info">Deposit paid</span><span class="chip ok">Client reminded</span><span class="chip warn">Text to '+first+' at '+fmtT(a.start-15)+'</span>';
+  };
+  view.innerHTML=`<section class="panel">
+    <div class="field"><label for="viewer">Signed in as (demo)</label><select id="viewer">${CHAIRS.map(id=>`<option value="${id}" ${viewer===id?'selected':''}>${BARBERS.find(x=>x.id===id).name}${id==='danny'?' (owner)':''}</option>`).join('')}</select><span class="hint">${owner?'Owner view: sees every barber’s schedule and statement.':'Barber view: sees only their own clients and statement.'}</span></div>
+    <div><div class="label">${owner?'Shop dashboard':esc(BARBERS.find(x=>x.id===viewer).name)+'’s chair'}</div><h2>${day===ymd(today)?'Today':new Date(day+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</h2></div>
+    <div class="days">${days}</div>
+    ${(()=>{const n=list.find(a=>a.status==='confirmed');if(!n)return '';const bn=BARBERS.find(x=>x.id===n.barber).name.split(' ')[0];return `<div class="notes"><span>BARBER TEXT PREVIEW</span><br>To ${bn}, ${fmtT(n.start-15)}: "Heads up: ${esc(n.name.replace(' (example)',''))} is in your chair at ${fmtT(n.start)}. ${svc(n.svc).name}.${n.notes?' Notes: '+esc(n.notes):''}"</div>`})()}
+    <div class="stats">
+      <div class="stat"><div class="n">${live.length}</div><div class="k">appointments</div></div>
+      <div class="stat"><div class="n">$${rev}</div><div class="k">booked this day</div></div>
+      <div class="stat"><div class="n">${week.length}</div><div class="k">booked next 7 days</div></div>
+    </div>
+    <div>${list.length?list.map(a=>{const s=svc(a.svc);return `<div class="appt">
+      <div class="time">${fmtT(a.start)}</div>
+      <div><div class="who"><b>${esc(a.name)}</b><span class="price">$${s.price}</span></div>
+        <div class="hint">${s.name} · ${s.min} min · with ${BARBERS.find(x=>x.id===a.barber).name}</div>
+        ${a.notes?`<div class="notes"><span>CUT NOTES</span> ${esc(a.notes)}</div>`:''}
+        <div class="chips">${chipFor(a)}</div>
+        ${a.status==='confirmed'?`<div class="mini"><button data-done="${a.id}">Mark done</button><button data-noshow="${a.id}">No-show</button></div>`:''}
+      </div></div>`}).join(''):'<div class="empty">Nothing booked. Share your booking link to fill the chair.</div>'}</div>
+    <div class="hint">$${deposits} in deposits collected so far in this demo.</div>
+  </section>
+  <section class="panel" style="margin-top:18px">
+    <div><div class="label">Calendar sync</div><h2>Sync to my calendar</h2><p class="hint" style="margin:4px 0 0">Your bookings show up in Google Calendar or your iPhone calendar automatically. Set it up once.</p></div>
+    <div class="list">${CHAIRS.filter(id=>owner||id===viewer).map(id=>{const x=BARBERS.find(y=>y.id===id);return `<button class="opt" data-cal="${id}" aria-pressed="${calBarber===id}"><span><b>${x.name}</b></span><span class="sub">${calBarber===id?'Selected':'Get my link'}</span></button>`}).join('')}</div>
+    ${calBarber?(()=>{const link='https://book.fades4change.com/cal/'+calBarber+'-7k2q.ics';return `
+      <div class="field"><label for="cal-link">Your private calendar link (demo)</label>
+        <div class="row"><input id="cal-link" readonly value="${link}" style="flex:1;min-width:0"><button class="btn ghost" data-copy>${copied?'Copied':'Copy'}</button></div>
+        <span class="hint">Keep this private. Anyone with it can see your schedule.</span></div>
+      <div><div class="label">Google Calendar</div><div class="timeline">
+        <div><span class="t">1</span><span>On a computer, open Google Calendar.</span></div>
+        <div><span class="t">2</span><span>Next to "Other calendars", click + then "From URL".</span></div>
+        <div><span class="t">3</span><span>Paste your link and click "Add calendar". It shows on your phone too.</span></div>
+      </div></div>
+      <div><div class="label">iPhone</div><div class="timeline">
+        <div><span class="t">1</span><span>Settings → Calendar → Accounts → Add Account → Other.</span></div>
+        <div><span class="t">2</span><span>Tap "Add Subscribed Calendar", paste your link, tap Next.</span></div>
+      </div></div>
+      <div class="demo">Google checks for new bookings every few hours. Last-minute bookings are covered by the 15-minute heads-up text.</div>`})():''}
+  </section>
+  ${(()=>{const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    const renters=CHAIRS.filter(id=>id!=='danny'&&(owner||id===viewer));
+    const block=ws=>{const key=ymd(ws);const closed=ymd(addDays(ws,7))<=ymd(today);
+      const rows=renters.map(id=>{const x=BARBERS.find(y=>y.id===id);const first=x.name.split(' ')[0];
+        const appts=data.appts.filter(a=>a.barber===id&&inWk(a.day,ws)&&a.deposit);
+        const dep=appts.length*DEPOSIT;const bal=dep-data.rent;const k=key+'|'+id;const st=data.settled[k];
+        let line=bal>0?`Shop owes ${first} $${bal}`:bal<0?`${first} owes $${-bal} rent`:'Even, nothing owed';
+        if(!closed)line=bal>0?`So far: shop owes ${first} $${bal}`:bal<0?`So far: $${-bal} rent left`:'So far: even';
+        let status;
+        if(!closed)status='<span class="chip info">In progress · closes Sunday night</span>';
+        else if(bal===0)status='<span class="chip ok">Settled</span>';
+        else if(!st)status=owner?`<span class="mini" style="margin:0"><button data-settle="${k}">${bal>0?'Mark paid back':'Mark rent received'}</button></span>`:'<span class="chip warn">Waiting on Danny</span>';
+        else if(!st.ack)status=`<span class="chip info">Danny marked ${bal>0?'paid':'received'} ${st.at}</span>`+(owner?`<span class="chip warn">Waiting on ${first}</span>`:`<span class="mini" style="margin:0"><button data-ack="${k}">${bal>0?'I got it':'Confirm'}</button></span>`);
+        else status=`<span class="chip ok">Settled ${st.at} · ${first} confirmed</span>`;
+        const open=openDetail===k;
+        return `<div class="stmt">
+          <div class="who"><b>${x.name}</b><span class="price">${appts.length} booked</span></div>
+          <div class="bal ${bal>0?'pos':bal<0?'neg':''}">${line}</div>
+          <div class="hint">$${dep} in deposits − $${data.rent} rent = ${bal>=0?'$'+bal:'−$'+(-bal)}</div>
+          <div class="chips">${status}</div>
+          <button class="linkbtn" data-detail="${k}">${open?'Hide':'Show'} the ${appts.length} bookings</button>
+          ${open?`<div class="notes">${appts.slice().sort((p,q)=>p.day.localeCompare(q.day)||p.start-q.start).map(a=>`${new Date(a.day+'T00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})} ${fmtT(a.start)} · ${esc(a.name)}${a.status==='noshow'?' · no-show':''} · $${DEPOSIT}`).join('<br>')}</div>`:''}
+        </div>`}).join('');
+      return `<div class="wk"><div class="label">${closed?'Last week':'This week'} · ${f(ws)} – ${f(addDays(ws,6))}</div>${rows}</div>`};
+    return `<section class="panel" style="margin-top:18px">
+    <div><div class="label">Booth rent</div><h2>Weekly statements</h2><p class="hint" style="margin:4px 0 0">Every $${DEPOSIT} deposit goes to the shop account and counts toward the booked barber’s rent. Weeks close Sunday night. Danny and each barber see the same statement, and both sign off when money changes hands.</p></div>
+    ${owner?`<div class="field"><label for="rent-amt">Weekly booth rent (example amount)</label><input id="rent-amt" type="number" min="0" step="5" value="${data.rent}" style="max-width:140px"></div>`:`<div class="hint">Weekly booth rent: $${data.rent}</div>`}
+    ${[addDays(weekStart(),-7),weekStart()].map(block).join('')}
+  </section>`})()}`;
+}
+
+function render(){mode==='client'?renderClient():renderBarber();
+  document.getElementById('v-client').setAttribute('aria-pressed',mode==='client');
+  document.getElementById('v-barber').setAttribute('aria-pressed',mode==='barber');}
+
+view.addEventListener('change',e=>{if(e.target.id==='rent-amt'){data.rent=Math.max(0,+e.target.value||0);save();render()}if(e.target.id==='viewer'){viewer=e.target.value;calBarber=null;openDetail=null;render()}});
+view.addEventListener('input',e=>{if(e.target.id==='f-name')b.name=e.target.value;if(e.target.id==='f-phone')b.phone=e.target.value;if(e.target.id==='f-notes')b.notes=e.target.value});
+view.addEventListener('click',e=>{
+  const t=e.target.closest('button');if(!t)return;const d=t.dataset;
+  if(d.svc){b.svc=d.svc;b.start=null;b.step=1}
+  else if(d.barber){b.barber=d.barber;b.start=null;b.step=2}
+  else if(d.day){b.day=d.day;b.start=null}
+  else if(d.start){b.start=+d.start}
+  else if('next' in d){b.step++}
+  else if('back' in d){b.step--}
+  else if('book' in d){
+    const err=document.getElementById('err');
+    if(!b.name.trim()){err.textContent='Add your name so your barber knows who’s in the chair.';return}
+    if(b.phone.replace(/\D/g,'').length<10){err.textContent='Enter a 10-digit mobile number for your reminders.';return}
+    const len=svc(b.svc).min;const barber=b.barber==='any'?assign(b.day,b.start,len):b.barber;
+    if(!barber||busy(barber,b.day,b.start,len)){err.textContent='That time just got taken. Go back and pick another.';return}
+    const a={id:Math.random().toString(36).slice(2),day:b.day,start:b.start,svc:b.svc,barber,name:b.name.trim(),phone:b.phone,notes:b.notes.trim(),status:'confirmed',deposit:true};
+    data.appts.push(a);save();b.result=a;b.step=4;barberDay=a.day;
+  }
+  else if('again' in d){b={step:0,svc:null,barber:null,day:null,start:null,name:'',phone:'',notes:''}}
+  else if('see' in d){mode='barber'}
+  else if(d.bday){barberDay=d.bday}
+  else if(d.cal){calBarber=d.cal;copied=false}
+  else if(d.settle){data.settled[d.settle]={at:new Date().toLocaleDateString(undefined,{month:'short',day:'numeric'}),ack:false};save()}
+  else if(d.ack){if(data.settled[d.ack])data.settled[d.ack].ack=true;save()}
+  else if(d.detail){openDetail=openDetail===d.detail?null:d.detail}
+  else if('copy' in d){const inp=document.getElementById('cal-link');const sel=()=>{inp.focus();inp.select()};try{navigator.clipboard.writeText(inp.value).then(()=>{copied=true;render()},sel)}catch(err){sel()}return}
+  else if(d.done||d.noshow){const a=data.appts.find(x=>x.id===(d.done||d.noshow));a.status=d.done?'done':'noshow';save()}
+  else return;
+  render();
+});
+document.getElementById('v-client').onclick=()=>{mode='client';render()};
+document.getElementById('v-barber').onclick=()=>{mode='barber';render()};
+document.getElementById('reset').onclick=()=>{data=fresh();save();b={step:0,svc:null,barber:null,day:null,start:null,name:'',phone:'',notes:''};render()};
+render();
+})();
+</script>

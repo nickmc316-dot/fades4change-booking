@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Book at Fades 4 Change</title>
+<meta name="description" content="Book your cut at Fades 4 Change Barbershop / Barberia in Wellford, SC.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="pole" aria-hidden="true"></div>
+      <div><h1>Fades 4 Change</h1><small>Barbershop / Barberia · 311 Spartanburg Hwy, Suite A, Wellford, SC</small></div></div>
+  </header>
+  <main id="view"><section class="panel"><div class="empty">Loading the schedule…</div></section></main>
+  <footer class="foot"><a href="staff.html">Barber login</a></footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  const C = window.F4C_CONFIG, T = window.F4C_TIME;
+  const sb = supabase.createClient(C.supabaseUrl, C.supabaseKey, { auth: { persistSession: false } });
+  const view = document.getElementById('view');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = c => '$' + (c / 100).toFixed(c % 100 ? 2 : 0);
+
+  let shop, services = [], barbers = [], busy = [];
+  let s = { step: 0, svc: null, barber: null, day: null, start: null, name: '', phone: '', email: '', notes: '', result: null, error: '' };
+
+  async function init() {
+    const [a, b, c] = await Promise.all([
+      sb.from('shops').select('*').eq('id', C.shopId).single(),
+      sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort'),
+      sb.rpc('public_barbers', { p_shop: C.shopId }),
+    ]);
+    if (a.error || b.error || c.error) {
+      view.innerHTML = '<section class="panel"><div class="empty">Booking is unavailable right now. Please call or stop by the shop.</div></section>';
+      return;
+    }
+    shop = a.data; services = b.data; barbers = c.data;
+    s.day = T.todayIn(shop.timezone);
+    render();
+  }
+
+  async function loadBusy() {
+    const from = T.toUtc(s.day, 0, shop.timezone), to = T.toUtc(T.addDays(s.day, 1), 0, shop.timezone);
+    const { data, error } = await sb.rpc('busy_times', { p_shop: C.shopId, p_from: from.toISOString(), p_to: to.toISOString() });
+    busy = error ? [] : data.map(r => ({ barber: r.barber_id, a: new Date(r.starts_at).getTime(), b: new Date(r.ends_at).getTime() }));
+  }
+
+  const svc = () => services.find(x => x.id === s.svc);
+  const barberName = id => (barbers.find(x => x.id === id) || {}).name || 'First available';
+  function free(barberId, a, b) { return !busy.some(k => k.barber === barberId && a < k.b && k.a < b); }
+  function slots() {
+    const len = svc().minutes, out = [], soon = Date.now() + 15 * 60000;
+    for (let m = shop.open_minute; m + len <= shop.close_minute; m += shop.slot_minutes) {
+      const a = T.toUtc(s.day, m, shop.timezone).getTime(), b = a + len * 60000;
+      const ok = a > soon && (s.barber ? free(s.barber, a, b) : barbers.some(x => free(x.id, a, b)));
+      out.push({ m, ok });
+    }
+    return out;
+  }
+  const stepsBar = () => '<div class="steps" aria-hidden="true">' + [0, 1, 2, 3].map(i => `<span class="${i <= s.step ? 'on' : ''}"></span>`).join('') + '</div>';
+
+  function render() {
+    let h = '<section class="panel">';
+    if (s.step < 4) h += stepsBar();
+    if (s.step === 0) {
+      h += '<div><div class="label">Step 1 of 4</div><h2>What are we doing today?</h2></div><div class="list">' +
+        services.map(x => `<button class="opt" data-svc="${x.id}" aria-pressed="${s.svc === x.id}"><span><b>${esc(x.name)}</b><br><span class="sub">${x.minutes} min</span></span><span class="price">${money(x.price_cents)}</span></button>`).join('') + '</div>';
+    } else if (s.step === 1) {
+      h += '<div><div class="label">Step 2 of 4</div><h2>Pick your barber</h2></div><div class="list">' +
+        barbers.map(x => `<button class="opt" data-barber="${x.id}" aria-pressed="${s.barber === x.id}"><span><b>${esc(x.name)}</b><br><span class="sub">${x.role === 'owner' ? 'Owner' : esc(x.specialty || 'Barber')}</span></span></button>`).join('') +
+        `<button class="opt" data-barber="any" aria-pressed="${s.step > 1 && !s.barber}"><span><b>First available</b><br><span class="sub">Fastest way in</span></span></button></div>` +
+        '<div class="row"><button class="btn ghost" data-back>Back</button></div>';
+    } else if (s.step === 2) {
+      const today = T.todayIn(shop.timezone);
+      let days = '';
+      for (let i = 0; i < 14; i++) {
+        const d = T.addDays(today, i);
+        days += `<button class="day" data-day="${d}" aria-pressed="${s.day === d}"><small>${i === 0 ? 'Today' : T.label(d, { weekday: 'short' })}</small><strong>${+d.slice(8)}</strong></button>`;
+      }
+      const sl = slots();
+      const apptOnly = (shop.appointment_only_dows || []).includes(T.dow(s.day));
+      h += `<div><div class="label">Step 3 of 4</div><h2>When works?</h2></div><div class="days">${days}</div>` +
+        (apptOnly ? '<div class="note">Sunday is appointment only. No walk-ins.</div>' : '') +
+        (sl.some(x => x.ok) ? `<div class="slots">${sl.map(x => `<button class="slot" data-start="${x.m}" ${x.ok ? '' : 'disabled'} aria-pressed="${s.start === x.m}">${T.fmt(x.m)}</button>`).join('')}</div>`
+          : '<div class="empty">No open times this day. Try another.</div>') +
+        `<div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-next ${s.start == null ? 'disabled' : ''}>Continue</button></div>`;
+    } else if (s.step === 3) {
+      const x = svc();
+      h += `<div><div class="label">Step 4 of 4</div><h2>Lock it in</h2></div>
+        <dl class="summary"><dt>Service</dt><dd>${esc(x.name)} · ${money(x.price_cents)}</dd><dt>Barber</dt><dd>${esc(barberName(s.barber))}</dd>
+        <dt>When</dt><dd>${T.label(s.day, { weekday: 'long', month: 'short', day: 'numeric' })} at ${T.fmt(s.start)}</dd></dl>
+        <div class="field"><label for="f-name">Your name</label><input id="f-name" autocomplete="name" maxlength="80" value="${esc(s.name)}"></div>
+        <div class="field"><label for="f-phone">Mobile number</label><input id="f-phone" type="tel" autocomplete="tel" placeholder="(864) 555-1234" value="${esc(s.phone)}"></div>
+        <div class="field"><label for="f-email">Email</label><input id="f-email" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(s.email)}"><span class="hint">We email your reminder the day of your appointment.</span></div>
+        <div class="field"><label for="f-notes">How do you get it cut? (optional)</label><textarea id="f-notes" maxlength="500" placeholder="e.g. Mid fade, #2 on the sides, scissor top">${esc(s.notes)}</textarea></div>
+        <div class="box"><span><b>${money(shop.deposit_cents)} deposit</b><br><span class="hint">Pay it at the shop for now. It comes off your total.</span></span><span class="price">${money(shop.deposit_cents)}</span></div>
+        <div class="error" role="alert">${esc(s.error)}</div>
+        <div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-book>Book it</button></div>`;
+    } else {
+      const r = s.result;
+      h += `<div class="done-mark" aria-hidden="true">✓</div>
+        <div><h2>You're booked, ${esc(r.name.split(' ')[0])}.</h2><p class="hint" style="margin:4px 0 0">${esc(r.svc)} with ${esc(r.barber)}, ${r.when}.</p></div>
+        <p class="hint" style="margin:0">We'll email a reminder to ${esc(r.email)} the day of. Need to cancel? Call or text the shop.</p>
+        <div class="row"><button class="btn primary" data-again>Book another</button></div>`;
+    }
+    view.innerHTML = h + '</section>';
+  }
+
+  const errors = {
+    slot_taken: 'That time just got taken. Go back and pick another.',
+    outside_hours: 'That time is outside shop hours. Pick another.',
+    too_soon: 'That time is too soon to book online. Pick a later time.',
+    bad_phone: 'Enter a 10-digit mobile number.',
+    name_required: 'Add your name so your barber knows who’s in the chair.',
+  };
+
+  view.addEventListener('input', e => {
+    const m = { 'f-name': 'name', 'f-phone': 'phone', 'f-email': 'email', 'f-notes': 'notes' }[e.target.id];
+    if (m) s[m] = e.target.value;
+  });
+  view.addEventListener('click', async e => {
+    const t = e.target.closest('button'); if (!t) return; const d = t.dataset;
+    if (d.svc) { s.svc = d.svc; s.start = null; s.step = 1; }
+    else if (d.barber) { s.barber = d.barber === 'any' ? null : d.barber; s.start = null; s.step = 2; await loadBusy(); }
+    else if (d.day) { s.day = d.day; s.start = null; await loadBusy(); }
+    else if (d.start) { s.start = +d.start; }
+    else if ('next' in d) { s.step++; s.error = ''; }
+    else if ('back' in d) { s.step--; s.error = ''; if (s.step === 2) await loadBusy(); }
+    else if ('again' in d) { s = { step: 0, svc: null, barber: null, day: T.todayIn(shop.timezone), start: null, name: '', phone: '', email: '', notes: '', result: null, error: '' }; }
+    else if ('book' in d) {
+      if (!s.name.trim()) s.error = errors.name_required;
+      else if (s.phone.replace(/\D/g, '').length < 10) s.error = errors.bad_phone;
+      else if (!/^\S+@\S+\.\S+$/.test(s.email.trim())) s.error = 'Enter your email so we can send your reminder.';
+      else {
+        t.disabled = true; t.textContent = 'Booking…';
+        const { data, error } = await sb.rpc('create_booking', {
+          p_shop: C.shopId, p_service: s.svc, p_barber: s.barber, p_starts_at: T.toUtc(s.day, s.start, shop.timezone).toISOString(),
+          p_client_name: s.name, p_client_phone: s.phone, p_client_email: s.email, p_cut_notes: s.notes,
+        });
+        if (error) {
+          const code = Object.keys(errors).find(k => (error.message || '').includes(k));
+          s.error = code ? errors[code] : 'Something went wrong booking that. Try again, or call the shop.';
+        } else {
+          s.result = { id: data, name: s.name.trim(), email: s.email.trim(), svc: svc().name,
+            barber: s.barber ? barberName(s.barber) : 'the first available barber',
+            when: T.label(s.day, { weekday: 'long', month: 'short', day: 'numeric' }) + ' at ' + T.fmt(s.start) };
+          s.step = 4;
+        }
+      }
+    } else return;
+    render();
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
