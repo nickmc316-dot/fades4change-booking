@@ -16,6 +16,12 @@
 .tbl th{text-align:left;font:600 11px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
 .tbl td{padding:10px 8px 10px 0;border-bottom:1px solid var(--line);vertical-align:top}
 .ok-msg{color:var(--ok);font-size:14px;min-height:1em}
+.wkcard{margin-top:10px;gap:4px}
+.wkcard.open{border-top:5px solid var(--steel)}
+.wkcard.closed{border-top:5px solid var(--accent)}
+.wkhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;padding-bottom:8px}
+.wkhead h2{font-size:28px}
+.wkhead + .stmt{border-top:0}
 </style>
 </head>
 <body>
@@ -178,8 +184,11 @@
     const [a, b] = await Promise.all([lastWeek, thisWeek].map(w => sb.rpc('rent_statement', { p_shop: C.shopId, p_week_start: w })));
     if (a.error || b.error) return '<section class="panel"><div class="error">Couldn’t load statements. Refresh to try again.</div></section>';
     const block = (w, rows) => {
-      const label = w === lastWeek ? 'Last week' : 'This week';
-      return `<div><div class="label" style="padding-bottom:6px">${label} · ${T.label(w, { month: 'short', day: 'numeric' })} – ${T.label(T.addDays(w, 6), { month: 'short', day: 'numeric' })}</div>` +
+      const isLast = w === lastWeek;
+      return `<section class="panel wkcard ${isLast ? 'closed' : 'open'}">
+        <div class="wkhead"><div><h2>${isLast ? 'Last week' : 'This week'}</h2>
+          <div class="hint">${T.label(w, { weekday: 'short', month: 'short', day: 'numeric' })} – ${T.label(T.addDays(w, 6), { weekday: 'short', month: 'short', day: 'numeric' })}</div></div>
+          <span class="chip ${isLast ? 'warn' : 'info'}">${isLast ? 'Closed · settle up' : 'Still open'}</span></div>` +
         (rows.length ? rows.map(r => {
           const first = r.barber_name.split(' ')[0], bal = r.balance_cents, k = w + '|' + r.barber_id;
           let line = bal > 0 ? `Shop owes ${first} ${money(bal)}` : bal < 0 ? `${first} owes ${money(-bal)} rent` : 'Even, nothing owed';
@@ -194,14 +203,14 @@
             <div class="bal ${bal > 0 ? 'pos' : bal < 0 ? 'neg' : ''}">${line}</div>
             <div class="hint">${money(r.deposits_cents)} in deposits − ${money(r.rent_cents)} rent = ${money(bal)}</div>
             <div class="chips">${st}</div></div>`;
-        }).join('') : '<div class="empty">No renting barbers yet.</div>') + '</div>';
+        }).join('') : '<div class="empty">No renting barbers yet.</div>') + '</section>';
     };
     return `<section class="panel">
       <div><div class="label">Booth rent</div><h2>Weekly statements</h2><p class="hint" style="margin:4px 0 0">Each paid ${money(shop.deposit_cents)} deposit counts toward the booked barber’s rent. Weeks run Monday to Sunday. Danny and each barber see the same numbers, and both sign off when money changes hands.</p></div>
       ${owner() ? `<div class="field"><label for="rent-amt">Weekly booth rent ($)</label><div class="row"><input id="rent-amt" type="number" min="0" step="5" value="${shop.weekly_rent_cents / 100}" style="max-width:140px"><button class="btn ghost" data-saverent>Save</button></div></div>` : `<div class="hint">Weekly booth rent: ${money(shop.weekly_rent_cents)}</div>`}
-      ${block(lastWeek, a.data)}${block(thisWeek, b.data)}
       ${err ? `<div class="error" role="alert">${esc(err)}</div>` : ''}${msg ? `<div class="ok-msg">${esc(msg)}</div>` : ''}
-    </section>`;
+    </section>
+    ${block(thisWeek, b.data)}${block(lastWeek, a.data)}`;
   }
 
   async function profile() {
