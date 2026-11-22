@@ -42,20 +42,14 @@ Deno.serve(async (req) => {
 
   const status = String(pick(body, 'status') ?? '').toUpperCase();
   const type = String(pick(body, 'type') ?? '').toUpperCase();
-  // The checkout session id is documented as `data`; also accept it as a nested or differently named field.
-  const strings: string[] = [];
-  (function walk(v: unknown) {
-    if (typeof v === 'string') strings.push(v);
-    else if (v && typeof v === 'object') Object.values(v as Record<string, unknown>).forEach(walk);
-  })(body);
-  const candidates = [pick(body, 'data'), ...strings].filter((v) => typeof v === 'string' && v.length >= 8) as string[];
-  console.log('clover_webhook', JSON.stringify({ keys: Object.keys(body), status, type, data: pick(body, 'data') }).slice(0, 600));
+  // Clover sends the session id as `checkoutSessionId` (its docs call it `data`; accept both).
+  const sessionId = pick(body, 'checkoutSessionId') ?? pick(body, 'data');
   if (type && type !== 'PAYMENT') return new Response('ignored');
-  if (status !== 'APPROVED') return new Response('noted');
+  if (status !== 'APPROVED' || typeof sessionId !== 'string') return new Response('noted');
 
   const { data: b } = await sb.from('bookings').select('id, status')
-    .eq('shop_id', cfg.shop_id).in('payment_ref', [...new Set(candidates)].slice(0, 50)).maybeSingle();
-  if (!b) { console.log('clover_webhook_no_match'); return new Response('no matching booking'); }
+    .eq('shop_id', cfg.shop_id).eq('payment_ref', sessionId).maybeSingle();
+  if (!b) { console.log('clover_webhook_no_match', JSON.stringify({ keys: Object.keys(body), status, type })); return new Response('no matching booking'); }
 
   const paid = { deposit_paid: true, paid_at: new Date().toISOString() };
   if (b.status === 'pending' || b.status === 'cancelled') {
