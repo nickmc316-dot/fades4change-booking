@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fades 4 Change Walk-ins</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+.app{max-width:760px}
+body{font-size:17px}
+h2{font-size:30px}
+.lead{font-size:18px;color:var(--muted);margin:4px 0 0}
+.opt{padding:18px 20px;font-size:18px;border-radius:14px}
+.opt .sub{font-size:15px}
+.slot{padding:16px 6px;font-size:17px}
+.slots{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
+.btn{padding:16px 20px;font-size:18px;border-radius:14px}
+.field input{font-size:22px;padding:16px}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.chair{border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:2px}
+.chair b{font:700 19px var(--display)}
+.chair .next{font:600 22px var(--mono);font-variant-numeric:tabular-nums}
+.chair .next.full{font:600 16px var(--body);color:var(--accent)}
+.rule{border:2px solid var(--warn);border-radius:14px;padding:14px 16px;font-size:17px}
+.rule b{color:var(--warn)}
+.big-done{font:800 34px var(--display)}
+.clock{font:600 15px var(--mono);color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="pole" aria-hidden="true"></div>
+      <div><h1>Fades 4 Change</h1><small>Walk-ins welcome</small></div></div>
+    <div class="clock" id="clock"></div>
+  </header>
+  <main id="view"><section class="panel"><div class="empty">Loading today's chairs…</div></section></main>
+  <footer class="foot" id="foot"><a href="index.html">Book ahead online</a></footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  const C = window.F4C_CONFIG, T = window.F4C_TIME;
+  const sb = supabase.createClient(C.supabaseUrl, C.supabaseKey, { auth: { persistSession: false } });
+  const view = document.getElementById('view');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = c => '$' + (c / 100).toFixed(c % 100 ? 2 : 0);
+  const KEY = 'f4c-kiosk-token';
+  const ARRIVE_EARLY = 10;  // minutes
+  const DONE_RESET = 20;    // seconds the confirmation stays up
+  const IDLE_RESET = 90;    // seconds of no taps before going back to the start
+
+  // A device becomes the front-door tablet when Danny opens the setup link (?kiosk=...).
+  let token = null;
+  try {
+    const q = new URLSearchParams(location.search).get('kiosk');
+    if (q) { localStorage.setItem(KEY, q); history.replaceState(null, '', location.pathname); }
+    token = localStorage.getItem(KEY);
+  } catch (_) {}
+  let kiosk = false;
+
+  let shop, services = [], barbers = [], busy = [];
+  let s = fresh();
+  function fresh() { return { step: 0, svc: null, barber: null, start: null, name: '', error: '', result: null }; }
+
+  const nowMin = () => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: shop.timezone, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date()).map(x => [x.type, x.value]));
+    return +p.hour * 60 + +p.minute;
+  };
+  const today = () => T.todayIn(shop.timezone);
+  async function loadBusy() {
+    const d = today();
+    const { data } = await sb.rpc('busy_times', { p_shop: C.shopId,
+      p_from: T.toUtc(d, 0, shop.timezone).toISOString(), p_to: T.toUtc(T.addDays(d, 1), 0, shop.timezone).toISOString() });
+    busy = (data || []).map(r => ({ barber: r.barber_id, a: +new Date(r.starts_at), b: +new Date(r.ends_at) }));
+  }
+  const free = (id, a, b) => !busy.some(k => k.barber === id && a < k.b && k.a < b);
+  // Open start times left today for a barber (or anyone), for a service length.
+  function openSlots(barberId, minutes) {
+    const out = [], d = today(), earliest = nowMin() - 5;
+    for (let m = shop.open_minute; m + minutes <= shop.close_minute; m += shop.slot_minutes) {
+      if (m < earliest) continue;
+      const a = +T.toUtc(d, m, shop.timezone), b = a + minutes * 60000;
+      if (barberId ? free(barberId, a, b) : barbers.some(x => free(x.id, a, b))) out.push(m);
+    }
+    return out;
+  }
+  const defaultLen = () => Math.max(...services.map(x => x.minutes), 30);
+
+  async function init() {
+    const [a, b, c] = await Promise.all([
+      sb.from('shops').select('*').eq('id', C.shopId).single(),
+      sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort'),
+      sb.rpc('public_barbers', { p_shop: C.shopId }),
+    ]);
+    if (a.error || b.error || c.error) { view.innerHTML = '<section class="panel"><div class="empty">Check-in is down right now. Please see the front desk.</div></section>'; return; }
+    shop = a.data; services = b.data; barbers = c.data;
+    if (token) { const r = await sb.rpc('kiosk_ok', { p_shop: C.shopId, p_token: token }); kiosk = !!r.data; }
+    if (kiosk) document.getElementById('foot').hidden = true;
+    await loadBusy();
+    render();
+    setInterval(tickClock, 15000); tickClock();
+    setInterval(async () => { if (s.step === 0) { await loadBusy(); render(); } }, 60000);
+  }
+  function tickClock() {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', { timeZone: shop.timezone, hour: 'numeric', minute: '2-digit' });
+  }
+
+  function board() {
+    const len = defaultLen();
+    return `<div class="board">${barbers.map(x => {
+      const o = openSlots(x.id, len);
+      return `<div class="chair"><b>${esc(x.name)}</b>${o.length
+        ? `<span class="hint">Next open</span><span class="next">${T.fmt(o[0])}</span><span class="hint">${o.length} open time${o.length === 1 ? '' : 's'} left today</span>`
+        : '<span class="next full">Booked up today</span>'}</div>`;
+    }).join('')}</div>`;
+  }
+
+  function render() {
+    let h = '<section class="panel">';
+    if (s.step === 0) {
+      h += `<div><h2>Walk in? Check in here.</h2><p class="lead">Here's who's open today. No deposit for walk-ins.</p></div>${board()}` +
+        (kiosk ? `<button class="btn primary" data-start>Check in</button>`
+               : `<div class="note">Walk-in check-in works on the tablet inside the shop. Want a time now? <a href="index.html">Book ahead online.</a></div>`);
+    } else if (s.step === 1) {
+      h += `<div><div class="label">Step 1 of 4</div><h2>What are we doing?</h2></div><div class="list">` +
+        services.map(x => `<button class="opt" data-svc="${x.id}"><span><b>${esc(x.name)}</b><br><span class="sub">${x.minutes} min</span></span><span class="price">${money(x.price_cents)}</span></button>`).join('') +
+        `</div><div class="row"><button class="btn ghost" data-home>Start over</button></div>`;
+    } else if (s.step === 2) {
+      const len = svc().minutes;
+      h += `<div><div class="label">Step 2 of 4</div><h2>Who would you like?</h2></div><div class="list">` +
+        barbers.map(x => { const o = openSlots(x.id, len);
+          return `<button class="opt" data-barber="${x.id}" ${o.length ? '' : 'disabled style="opacity:.5"'}><span><b>${esc(x.name)}</b><br><span class="sub">${o.length ? 'Next open ' + T.fmt(o[0]) : 'Booked up today'}</span></span></button>`; }).join('') +
+        (() => { const o = openSlots(null, len); return `<button class="opt" data-barber="any" ${o.length ? '' : 'disabled style="opacity:.5"'}><span><b>First available</b><br><span class="sub">${o.length ? 'Soonest: ' + T.fmt(o[0]) : 'Nobody open today'}</span></span></button>`; })() +
+        `</div><div class="row"><button class="btn ghost" data-back>Back</button></div>`;
+    } else if (s.step === 3) {
+      const o = openSlots(s.barber, svc().minutes);
+      h += `<div><div class="label">Step 3 of 4</div><h2>Pick your time</h2><p class="lead">Today with ${esc(barberName())}</p></div>` +
+        (o.length ? `<div class="slots">${o.map(m => `<button class="slot" data-start-at="${m}" aria-pressed="${s.start === m}">${T.fmt(m)}</button>`).join('')}</div>` : '<div class="empty">No open times left today.</div>') +
+        `<div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-next ${s.start == null ? 'disabled' : ''}>Continue</button></div>`;
+    } else if (s.step === 4) {
+      h += `<div><div class="label">Step 4 of 4</div><h2>What's your name?</h2></div>
+        <div class="field"><label for="w-name">First and last name</label><input id="w-name" maxlength="80" autocomplete="off" value="${esc(s.name)}"></div>
+        <div class="rule">${arriveRule(s.start, true)}</div>
+        <div class="error" role="alert">${esc(s.error)}</div>
+        <div class="row"><button class="btn ghost" data-back>Back</button><button class="btn primary" data-checkin>Check me in</button></div>`;
+    } else {
+      const r = s.result;
+      h += `<div class="done-mark" aria-hidden="true">✓</div>
+        <div class="big-done">You're in, ${esc(r.name.split(' ')[0])}.</div>
+        <p class="lead" style="margin:0">${esc(r.svc)} with <b>${esc(r.barber)}</b> at <b>${T.fmt(r.start)}</b>.</p>
+        <div class="rule">${arriveRule(r.start, false)}</div>
+        <button class="btn primary" data-home>Done</button>`;
+    }
+    view.innerHTML = h + '</section>';
+    if (s.step === 4) { const i = document.getElementById('w-name'); if (i && !s.name) i.focus(); }
+  }
+  // The 10-minute rule, or "have a seat" when the time is about to start.
+  function arriveRule(start, before) {
+    if (start - ARRIVE_EARLY <= nowMin()) return `<b>Your time starts soon, so stay inside.</b> If you step out, you may be moved to the next open time.`;
+    return before
+      ? `<b>Be inside by ${T.fmt(start - ARRIVE_EARLY)}.</b> That's ${ARRIVE_EARLY} minutes before your ${T.fmt(start)} time. If you're not here by then, we may move you to the next open time.`
+      : `<b>Be inside by ${T.fmt(start - ARRIVE_EARLY)}.</b> If you step out, come back by then or you may be moved to the next open time.`;
+  }
+  const svc = () => services.find(x => x.id === s.svc);
+  const barberName = () => s.barber ? (barbers.find(x => x.id === s.barber) || {}).name : 'the first available barber';
+
+  // Go back to the start after a check-in, or when someone walks away mid-way.
+  let doneTimer = null, idleTimer = null;
+  function home() { clearTimeout(doneTimer); s = fresh(); loadBusy().then(render); }
+  function poke() { clearTimeout(idleTimer); if (s.step > 0 && s.step < 5) idleTimer = setTimeout(home, IDLE_RESET * 1000); }
+  ['click', 'input', 'touchstart'].forEach(ev => document.addEventListener(ev, poke, { passive: true }));
+
+  const ERR = {
+    slot_taken: 'Someone just took that time. Go back and pick another.',
+    name_required: 'Type your name so your barber knows who’s next.',
+    too_soon: 'That time has passed. Go back and pick another.',
+    kiosk_not_set_up: 'This tablet isn’t set up for check-in. Please see the front desk.',
+  };
+  view.addEventListener('input', e => { if (e.target.id === 'w-name') s.name = e.target.value; });
+  view.addEventListener('click', async e => {
+    const t = e.target.closest('button'); if (!t || t.disabled) return; const d = t.dataset;
+    if ('start' in d) { s.step = 1; await loadBusy(); }
+    else if (d.svc) { s.svc = d.svc; s.step = 2; }
+    else if (d.barber) { s.barber = d.barber === 'any' ? null : d.barber; s.start = null; s.step = 3; await loadBusy(); }
+    else if (d.startAt) { s.start = +d.startAt; }
+    else if ('next' in d) { s.step = 4; s.error = ''; }
+    else if ('back' in d) { s.step--; s.error = ''; }
+    else if ('home' in d) { return home(); }
+    else if ('checkin' in d) {
+      if (!s.name.trim()) { s.error = ERR.name_required; return render(); }
+      t.disabled = true; t.textContent = 'Checking you in…';
+      const { data, error } = await sb.rpc('create_walkin', { p_shop: C.shopId, p_token: token, p_service: s.svc, p_barber: s.barber,
+        p_starts_at: T.toUtc(today(), s.start, shop.timezone).toISOString(), p_client_name: s.name });
+      if (error) {
+        const code = Object.keys(ERR).find(k => (error.message || '').includes(k));
+        s.error = code ? ERR[code] : 'Check-in didn’t go through. Try again, or see the front desk.';
+      } else {
+        s.result = { name: s.name.trim(), barber: data[0].barber_name, svc: svc().name, start: s.start };
+        s.step = 5;
+        doneTimer = setTimeout(home, DONE_RESET * 1000);
+      }
+    } else return;
+    render();
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
