@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fades 4 Change Staff</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+.tabs{display:flex;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px;align-self:flex-start;flex-wrap:wrap}
+.tabs button{border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:7px 14px;border-radius:999px;cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font:600 11px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
+.tbl td{padding:10px 8px 10px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.ok-msg{color:var(--ok);font-size:14px;min-height:1em}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="pole" aria-hidden="true"></div>
+      <div><h1>Fades 4 Change</h1><small id="who">Staff</small></div></div>
+    <button class="btn ghost" id="signout" hidden>Sign out</button>
+  </header>
+  <main id="view"><section class="panel"><div class="empty">Loading…</div></section></main>
+  <footer class="foot"><a href="index.html">Client booking page</a></footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  const C = window.F4C_CONFIG, T = window.F4C_TIME;
+  const sb = supabase.createClient(C.supabaseUrl, C.supabaseKey);
+  const view = document.getElementById('view');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = c => (c < 0 ? '−' : '') + '$' + (Math.abs(c) / 100).toFixed(Math.abs(c) % 100 ? 2 : 0);
+  const CARRIERS = { verizon: 'Verizon', tmobile: 'T-Mobile', att: 'AT&T', uscellular: 'US Cellular', cricket: 'Cricket', metro: 'Metro by T-Mobile', boost: 'Boost', googlefi: 'Google Fi', other: 'Other' };
+  // Carriers whose email-to-text addresses still deliver; everyone else gets app notifications.
+  const EMAIL_TEXT_OK = ['verizon', 'tmobile', 'uscellular', 'googlefi'];
+
+  let shop, me, tab = 'schedule', day, authMode = 'signin', msg = '', err = '', openDetail = null;
+
+  // ── Auth ──────────────────────────────────────────────────────────────
+  function renderAuth() {
+    document.getElementById('signout').hidden = true;
+    document.getElementById('who').textContent = 'Staff login';
+    view.innerHTML = `<section class="panel">
+      <div class="tabs" role="group" aria-label="Login or create account">
+        <button data-auth="signin" aria-pressed="${authMode === 'signin'}">Log in</button>
+        <button data-auth="signup" aria-pressed="${authMode === 'signup'}">Create account</button>
+      </div>
+      <div><h2>${authMode === 'signin' ? 'Barber login' : 'Set up your login'}</h2>
+        <p class="hint" style="margin:4px 0 0">${authMode === 'signin' ? 'Use the email Danny has on file for you.' : 'Use the email Danny added for you. We’ll send a link to confirm it.'}</p></div>
+      <form id="authform" class="list" novalidate>
+        <div class="field"><label for="a-email">Email</label><input id="a-email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" autocomplete="${authMode === 'signin' ? 'current-password' : 'new-password'}" minlength="8" required>
+          ${authMode === 'signup' ? '<span class="hint">At least 8 characters.</span>' : ''}</div>
+        <div class="error" role="alert">${esc(err)}</div><div class="ok-msg" role="status">${esc(msg)}</div>
+        <button class="btn primary" type="submit">${authMode === 'signin' ? 'Log in' : 'Create account'}</button>
+      </form>
+      ${authMode === 'signin' ? '<button class="linkbtn" data-forgot>Forgot your password?</button>' : ''}
+    </section>`;
+  }
+
+  view.addEventListener('submit', async e => {
+    if (e.target.id === 'authform') {
+      e.preventDefault();
+      const email = document.getElementById('a-email').value.trim(), password = document.getElementById('a-pass').value;
+      err = ''; msg = '';
+      if (!/^\S+@\S+\.\S+$/.test(email)) { err = 'Enter your email.'; return renderAuth(); }
+      if (password.length < 8) { err = 'Passwords are at least 8 characters.'; return renderAuth(); }
+      const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
+      if (authMode === 'signin') {
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) { err = /confirm/i.test(error.message) ? 'Confirm your email first: open the link we sent you.' : 'That email and password don’t match.'; renderAuth(); }
+      } else {
+        const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.href.split('#')[0] } });
+        if (error) { err = error.message; renderAuth(); }
+        else if (!data.session) { msg = 'Check your email and open the link to confirm, then log in here.'; authMode = 'signin'; renderAuth(); }
+      }
+    }
+    if (e.target.id === 'profileform') { e.preventDefault(); await saveProfile(); }
+  });
+
+  // ── Session start ─────────────────────────────────────────────────────
+  let starting = false;
+  async function start() {
+    if (starting) return; starting = true;
+    try { await startInner(); } finally { starting = false; }
+  }
+  async function startInner() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return renderAuth();
+    const { data: barberId, error } = await sb.rpc('claim_barber_profile');
+    if (error || !barberId) {
+      document.getElementById('signout').hidden = false;
+      view.innerHTML = `<section class="panel"><h2>You're logged in, but not on the team list yet</h2>
+        <p class="hint" style="margin:0">Ask Danny to add <b>${esc(session.user.email)}</b> as your email in the app, then log in again.</p></section>`;
+      return;
+    }
+    const [b, s] = await Promise.all([
+      sb.from('barbers').select('*').eq('id', barberId).single(),
+      sb.from('shops').select('*').eq('id', C.shopId).single(),
+    ]);
+    me = b.data; shop = s.data;
+    day = T.todayIn(shop.timezone);
+    document.getElementById('signout').hidden = false;
+    document.getElementById('who').textContent = me.name + (me.role === 'owner' ? ' · Owner' : '');
+    render();
+  }
+
+  // ── Views ─────────────────────────────────────────────────────────────
+  const owner = () => me.role === 'owner';
+  function tabs() {
+    const t = [['schedule', 'Schedule'], ['rent', 'Booth rent'], ['profile', 'My profile']];
+    if (owner()) t.push(['team', 'Team']);
+    return `<div class="tabs" role="group" aria-label="Sections">${t.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`;
+  }
+  async function render() {
+    err = err || '';
+    const body = await ({ schedule: schedule, rent: rent, profile: profile, team: team }[tab])();
+    view.innerHTML = tabs() + body;
+  }
+
+  const timeIn = iso => new Date(iso).toLocaleTimeString('en-US', { timeZone: shop.timezone, hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+
+  async function schedule() {
+    const from = T.toUtc(day, 0, shop.timezone).toISOString(), to = T.toUtc(T.addDays(day, 1), 0, shop.timezone).toISOString();
+    const [{ data: list, error }, { data: team }] = await Promise.all([
+      sb.from('bookings').select('*, services(name, minutes, price_cents)').gte('starts_at', from).lt('starts_at', to).order('starts_at'),
+      owner() ? sb.from('barbers').select('id, name') : Promise.resolve({ data: [me] }),
+    ]);
+    if (error) return '<section class="panel"><div class="error">Couldn’t load the schedule. Refresh to try again.</div></section>';
+    const names = Object.fromEntries((team || []).map(x => [x.id, x.name]));
+    const today = T.todayIn(shop.timezone);
+    let days = '';
+    for (let i = -1; i < 13; i++) {
+      const d = T.addDays(today, i);
+      days += `<button class="day" data-day="${d}" aria-pressed="${d === day}"><small>${i === 0 ? 'Today' : T.label(d, { weekday: 'short' })}</small><strong>${+d.slice(8)}</strong></button>`;
+    }
+    const live = list.filter(a => a.status !== 'cancelled' && a.status !== 'noshow');
+    const booked = live.reduce((t, a) => t + a.services.price_cents, 0);
+    const chip = a => ({
+      confirmed: (a.deposit_paid ? '<span class="chip ok">Deposit paid</span>' : '<span class="chip warn">Deposit not paid yet</span>'),
+      done: '<span class="chip ok">Done</span>', noshow: '<span class="chip bad">No-show</span>', cancelled: '<span class="chip info">Cancelled</span>',
+    }[a.status]);
+    return `<section class="panel">
+      <div><div class="label">${owner() ? 'Whole shop' : 'Your chair'}</div><h2>${day === today ? 'Today' : T.label(day, { weekday: 'long', month: 'short', day: 'numeric' })}</h2></div>
+      <div class="days">${days}</div>
+      <div class="stats">
+        <div class="stat"><div class="n">${live.length}</div><div class="k">appointments</div></div>
+        <div class="stat"><div class="n">${money(booked)}</div><div class="k">booked</div></div>
+        <div class="stat"><div class="n">${list.filter(a => a.deposit_paid).length}</div><div class="k">deposits paid</div></div>
+      </div>
+      <div>${list.length ? list.map(a => `<div class="appt">
+        <div class="time">${timeIn(a.starts_at)}</div>
+        <div><div class="who"><b>${esc(a.client_name)}</b><span class="price">${money(a.services.price_cents)}</span></div>
+          <div class="hint">${esc(a.services.name)} · ${a.services.minutes} min${owner() ? ' · with ' + esc(names[a.barber_id] || '') : ''}</div>
+          <div class="hint">${esc(a.client_phone)}${a.client_email ? ' · ' + esc(a.client_email) : ''}</div>
+          ${a.cut_notes ? `<div class="notes"><span>CUT NOTES</span> ${esc(a.cut_notes)}</div>` : ''}
+          <div class="chips">${chip(a)}</div>
+          <div class="mini">
+            ${a.status === 'confirmed' ? `<button data-status="done" data-id="${a.id}">Mark done</button><button data-status="noshow" data-id="${a.id}">No-show</button><button data-status="cancelled" data-id="${a.id}">Cancel</button>` : ''}
+            ${a.status !== 'confirmed' && a.status !== 'cancelled' ? `<button data-status="confirmed" data-id="${a.id}">Undo</button>` : ''}
+            ${owner() && a.status !== 'cancelled' ? `<button data-deposit="${a.deposit_paid ? 'no' : 'yes'}" data-id="${a.id}">${a.deposit_paid ? 'Undo deposit' : 'Deposit received'}</button>` : ''}
+          </div>
+        </div></div>`).join('') : '<div class="empty">Nothing booked this day.</div>'}</div>
+      ${err ? `<div class="error" role="alert">${esc(err)}</div>` : ''}
+    </section>`;
+  }
+
+  async function rent() {
+    const today = T.todayIn(shop.timezone), thisWeek = T.weekStart(today), lastWeek = T.addDays(thisWeek, -7);
+    const [a, b] = await Promise.all([lastWeek, thisWeek].map(w => sb.rpc('rent_statement', { p_shop: C.shopId, p_week_start: w })));
+    if (a.error || b.error) return '<section class="panel"><div class="error">Couldn’t load statements. Refresh to try again.</div></section>';
+    const block = (w, rows) => {
+      const label = w === lastWeek ? 'Last week' : 'This week';
+      return `<div><div class="label" style="padding-bottom:6px">${label} · ${T.label(w, { month: 'short', day: 'numeric' })} – ${T.label(T.addDays(w, 6), { month: 'short', day: 'numeric' })}</div>` +
+        (rows.length ? rows.map(r => {
+          const first = r.barber_name.split(' ')[0], bal = r.balance_cents, k = w + '|' + r.barber_id;
+          let line = bal > 0 ? `Shop owes ${first} ${money(bal)}` : bal < 0 ? `${first} owes ${money(-bal)} rent` : 'Even, nothing owed';
+          if (!r.week_closed) line = bal > 0 ? `So far: shop owes ${first} ${money(bal)}` : bal < 0 ? `So far: ${money(-bal)} rent left` : 'So far: even';
+          let st;
+          if (!r.week_closed) st = '<span class="chip info">In progress · closes Sunday night</span>';
+          else if (bal === 0) st = '<span class="chip ok">Settled</span>';
+          else if (!r.owner_marked_at) st = owner() ? `<span class="mini" style="margin:0"><button data-settle="${r.barber_id}" data-week="${w}">${bal > 0 ? 'Mark paid back' : 'Mark rent received'}</button></span>` : '<span class="chip warn">Waiting on Danny</span>';
+          else if (!r.barber_confirmed_at) st = `<span class="chip info">Danny marked ${bal > 0 ? 'paid' : 'received'}</span>` + (owner() ? `<span class="chip warn">Waiting on ${esc(first)}</span>` : `<span class="mini" style="margin:0"><button data-ack="${w}">${bal > 0 ? 'I got it' : 'Confirm'}</button></span>`);
+          else st = `<span class="chip ok">Settled · ${esc(first)} confirmed</span>`;
+          return `<div class="stmt"><div class="who"><b>${esc(r.barber_name)}</b><span class="price">${r.bookings} paid deposits</span></div>
+            <div class="bal ${bal > 0 ? 'pos' : bal < 0 ? 'neg' : ''}">${line}</div>
+            <div class="hint">${money(r.deposits_cents)} in deposits − ${money(r.rent_cents)} rent = ${money(bal)}</div>
+            <div class="chips">${st}</div></div>`;
+        }).join('') : '<div class="empty">No renting barbers yet.</div>') + '</div>';
+    };
+    return `<section class="panel">
+      <div><div class="label">Booth rent</div><h2>Weekly statements</h2><p class="hint" style="margin:4px 0 0">Each paid ${money(shop.deposit_cents)} deposit counts toward the booked barber’s rent. Weeks run Monday to Sunday. Danny and each barber see the same numbers, and both sign off when money changes hands.</p></div>
+      ${owner() ? `<div class="field"><label for="rent-amt">Weekly booth rent ($)</label><div class="row"><input id="rent-amt" type="number" min="0" step="5" value="${shop.weekly_rent_cents / 100}" style="max-width:140px"><button class="btn ghost" data-saverent>Save</button></div></div>` : `<div class="hint">Weekly booth rent: ${money(shop.weekly_rent_cents)}</div>`}
+      ${block(lastWeek, a.data)}${block(thisWeek, b.data)}
+      ${err ? `<div class="error" role="alert">${esc(err)}</div>` : ''}${msg ? `<div class="ok-msg">${esc(msg)}</div>` : ''}
+    </section>`;
+  }
+
+  async function profile() {
+    const { data } = await sb.from('barbers').select('*').eq('id', me.id).single();
+    me = data || me;
+    const method = me.notify_method === 'email_sms' ? 'Text message (sent by email to your carrier)' : 'App notification';
+    return `<section class="panel">
+      <div><div class="label">My profile</div><h2>${esc(me.name)}</h2></div>
+      <form id="profileform" class="list" novalidate>
+        <div class="field"><label for="p-phone">Mobile number</label><input id="p-phone" type="tel" autocomplete="tel" value="${esc(me.phone)}" placeholder="(864) 555-1234"></div>
+        <div class="field"><label for="p-carrier">Phone carrier</label><select id="p-carrier"><option value="">Choose your carrier</option>
+          ${Object.entries(CARRIERS).map(([k, v]) => `<option value="${k}" ${me.carrier === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+          <span class="hint">Used to text you 15 minutes before each client.</span></div>
+        <div class="field"><label for="p-spec">What you're known for (shows on the booking page)</label><input id="p-spec" maxlength="80" value="${esc(me.specialty)}" placeholder="e.g. Fades, designs, beards"></div>
+        <div class="box"><span><b>Heads-up alerts</b><br><span class="hint">${me.carrier ? method : 'Pick your carrier to set this up.'}</span></span></div>
+        <div class="error" role="alert">${esc(err)}</div><div class="ok-msg" role="status">${esc(msg)}</div>
+        <button class="btn primary" type="submit">Save profile</button>
+      </form>
+      <p class="hint" style="margin:0">Test texts and your calendar link are coming in the next update.</p>
+    </section>`;
+  }
+
+  async function saveProfile() {
+    const phone = document.getElementById('p-phone').value.trim(), carrier = document.getElementById('p-carrier').value || null;
+    const specialty = document.getElementById('p-spec').value.trim() || null;
+    err = ''; msg = '';
+    if (phone && phone.replace(/\D/g, '').length < 10) { err = 'Enter a 10-digit mobile number.'; return render(); }
+    const notify_method = carrier && EMAIL_TEXT_OK.includes(carrier) ? 'email_sms' : 'push';
+    const { error } = await sb.from('barbers').update({ phone: phone || null, carrier, specialty, notify_method }).eq('id', me.id);
+    if (error) err = 'Couldn’t save. Try again.'; else msg = 'Saved.';
+    render();
+  }
+
+  async function team() {
+    const { data, error } = await sb.from('barbers').select('*').order('role', { ascending: false }).order('name');
+    if (error) return '<section class="panel"><div class="error">Couldn’t load the team.</div></section>';
+    return `<section class="panel">
+      <div><div class="label">Owner only</div><h2>Team</h2><p class="hint" style="margin:4px 0 0">Add each barber’s email here. When they create an account with that email, it links to their chair automatically.</p></div>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Barber</th><th>Login email</th><th>Phone / carrier</th></tr></thead><tbody>
+      ${data.map(b => `<tr><td><b>${esc(b.name)}</b><br><span class="hint">${b.role === 'owner' ? 'Owner' : 'Barber'} · ${b.user_id ? 'Logged in' : 'Not set up yet'}</span></td>
+        <td><div class="row" style="flex-wrap:nowrap"><input id="em-${b.id}" type="email" value="${esc(b.email)}" placeholder="barber@email.com" style="min-width:180px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"><span class="mini" style="margin:0"><button data-saveemail="${b.id}">Save</button></span></div></td>
+        <td>${b.phone ? esc(b.phone) : '<span class="hint">—</span>'}<br><span class="hint">${b.carrier ? CARRIERS[b.carrier] : 'No carrier yet'}</span></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="error" role="alert">${esc(err)}</div><div class="ok-msg" role="status">${esc(msg)}</div>
+    </section>`;
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────
+  view.addEventListener('click', async e => {
+    const t = e.target.closest('button'); if (!t || (t.type === 'submit' && t.form)) return; const d = t.dataset;
+    if (d.auth) { authMode = d.auth; err = ''; msg = ''; return renderAuth(); }
+    if ('forgot' in d) {
+      const email = document.getElementById('a-email').value.trim();
+      if (!/^\S+@\S+\.\S+$/.test(email)) { err = 'Type your email above first.'; return renderAuth(); }
+      await sb.auth.resetPasswordForEmail(email, { redirectTo: location.href.split('#')[0] });
+      err = ''; msg = 'If that email is on the team, a reset link is on its way.'; return renderAuth();
+    }
+    err = ''; msg = '';
+    if (d.tab) tab = d.tab;
+    else if (d.day) day = d.day;
+    else if (d.status) { const { error } = await sb.from('bookings').update({ status: d.status }).eq('id', d.id); if (error) err = 'Couldn’t update that booking.'; }
+    else if (d.deposit) { const { error } = await sb.rpc('mark_deposit_paid', { p_booking: d.id, p_paid: d.deposit === 'yes' }); if (error) err = 'Couldn’t update the deposit.'; }
+    else if (d.settle) { const { error } = await sb.rpc('mark_rent_settled', { p_barber: d.settle, p_week_start: d.week }); if (error) err = 'Couldn’t mark that week.'; }
+    else if (d.ack) { const { error } = await sb.rpc('confirm_rent_settled', { p_week_start: d.ack }); if (error) err = 'Couldn’t confirm.'; }
+    else if ('saverent' in d) {
+      const v = Math.round(parseFloat(document.getElementById('rent-amt').value) * 100);
+      if (!(v >= 0)) err = 'Enter a rent amount.';
+      else { const { data, error } = await sb.from('shops').update({ weekly_rent_cents: v }).eq('id', shop.id).select().single(); if (error) err = 'Couldn’t save rent.'; else { shop = data; msg = 'Rent saved.'; } }
+    }
+    else if (d.saveemail) {
+      const v = document.getElementById('em-' + d.saveemail).value.trim().toLowerCase();
+      if (v && !/^\S+@\S+\.\S+$/.test(v)) err = 'That email doesn’t look right.';
+      else { const { error } = await sb.from('barbers').update({ email: v || null }).eq('id', d.saveemail); err = error ? (/duplicate|unique/i.test(error.message) ? 'Another barber already has that email.' : 'Couldn’t save the email.') : ''; if (!error) msg = 'Email saved.'; }
+    }
+    else return;
+    render();
+  });
+
+  document.getElementById('signout').onclick = async () => { await sb.auth.signOut(); me = null; tab = 'schedule'; authMode = 'signin'; renderAuth(); };
+  sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_IN' && !me) start(); });
+  start();
+})();
+</script>
+</body>
+</html>

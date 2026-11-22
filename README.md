@@ -7,6 +7,7 @@ Online booking for Fades 4 Change Barbershop / Barberia, 311 Spartanburg Hwy, Su
 | Path | What it is |
 |---|---|
 | `web/index.html` | Client booking page (pick service, barber, time; leaves name, phone, email, cut notes) |
+| `web/staff.html` | Staff login. Owner sees the whole shop, the team list and every rent statement; each barber sees only their own clients and statement |
 | `web/config.js` | Supabase project URL, public key, shop id, and shop-time helpers |
 | `web/styles.css` | Shared styles |
 | `supabase/migrations/` | Database schema, security rules and functions, in the order they were applied |
@@ -25,7 +26,7 @@ Online booking for Fades 4 Change Barbershop / Barberia, 311 Spartanburg Hwy, Su
 
 ## Still to build
 
-1. Staff login and dashboards (owner and barber views)
+1. Custom email sending (Supabase's built-in email only reaches project team members)
 2. Calendar subscription link per barber
 3. Email reminders to clients and email-to-text alerts to barbers
 4. Online deposits (Stripe)
