@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
   if (!/^[0-9a-f-]{36}$/.test(booking_id ?? '')) return json({ error: 'bad_booking' }, 400);
 
   const { data: b } = await sb.from('bookings')
-    .select('id, shop_id, status, payment_ref, deposit_cents, starts_at, client_name, client_email, services(name), barbers(name), shops(name, timezone)')
+    .select('id, shop_id, status, payment_ref, deposit_cents, starts_at, client_name, client_email, services(name), barbers(name), shops(name, timezone, slug)')
     .eq('id', booking_id).maybeSingle();
   if (!b) return json({ error: 'bad_booking' }, 404);
   if (b.status !== 'pending') return json({ error: 'not_waiting_for_payment' }, 409);
@@ -50,8 +50,8 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       customer,
       redirectUrls: {
-        success: `${SITE}/index.html?paid=${b.id}`,
-        failure: `${SITE}/index.html?payfail=${b.id}`,
+        success: `${SITE}/s/${x.shops?.slug}?paid=${b.id}`,
+        failure: `${SITE}/s/${x.shops?.slug}?payfail=${b.id}`,
       },
       shoppingCart: {
         lineItems: [{

@@ -7,21 +7,21 @@
 <meta name="description" content="Book your cut at Fades 4 Change Barbershop / Barberia in Wellford, SC.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="app">
   <header class="top">
     <div class="brand"><div class="pole" aria-hidden="true"></div>
-      <div><h1>Fades 4 Change</h1><small>Barbershop / Barberia · 311 Spartanburg Hwy, Suite A, Wellford, SC</small></div></div>
-    <a class="walkin-link" href="walkin.html">Walk-in? <b>Check in</b></a>
+      <div><h1 id="shop-name">Fades 4 Change</h1><small id="shop-addr">Barbershop / Barberia · 311 Spartanburg Hwy, Suite A, Wellford, SC</small></div></div>
+    <a class="walkin-link" id="walkin-link" href="/walkin.html">Walk-in? <b>Check in</b></a>
   </header>
   <main id="view"><section class="panel"><div class="empty">Loading the schedule…</div></section></main>
-  <footer class="foot"><a href="staff.html">Barber login</a></footer>
+  <footer class="foot"><a href="/staff.html">Barber login</a></footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js"></script>
+<script src="/config.js"></script>
 <script>
 (function () {
   const C = window.F4C_CONFIG, T = window.F4C_TIME;
@@ -34,10 +34,17 @@
   let s = { step: 0, svc: null, barber: null, day: null, start: null, name: '', phone: '', email: '', notes: '', result: null, error: '' };
 
   async function init() {
+    const found = await F4C_SHOP.load(sb);
+    if (!found) { view.innerHTML = '<section class="panel"><div class="empty">We couldn\u2019t find that shop. Check the link and try again.</div></section>'; return; }
+    SHOP_ID = found.id;
+    document.getElementById('shop-name').textContent = found.name;
+    document.getElementById('shop-addr').textContent = found.address || '';
+    document.getElementById('walkin-link').href = F4C_SHOP.walkinUrl(found.slug);
+    document.title = 'Book at ' + found.name;
     const [a, b, c] = await Promise.all([
-      sb.from('shops').select('*').eq('id', C.shopId).single(),
-      sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort'),
-      sb.rpc('public_barbers', { p_shop: C.shopId }),
+      Promise.resolve({ data: found, error: null }),
+      sb.from('services').select('*').eq('shop_id', SHOP_ID).eq('active', true).order('sort'),
+      sb.rpc('public_barbers', { p_shop: SHOP_ID }),
     ]);
     if (a.error || b.error || c.error) {
       view.innerHTML = '<section class="panel"><div class="empty">Booking is unavailable right now. Please call or stop by the shop.</div></section>';
@@ -45,7 +52,7 @@
     }
     shop = a.data; services = b.data; barbers = c.data;
     s.day = T.todayIn(shop.timezone);
-    payOnline = !!(await sb.rpc('online_payments_enabled', { p_shop: C.shopId })).data;
+    payOnline = !!(await sb.rpc('online_payments_enabled', { p_shop: SHOP_ID })).data;
     const q = new URLSearchParams(location.search);
     if (q.get('paid') || q.get('payfail')) return afterPayment(q.get('paid') || q.get('payfail'), !!q.get('paid'));
     render();
@@ -79,7 +86,7 @@
 
   async function loadBusy() {
     const from = T.toUtc(s.day, 0, shop.timezone), to = T.toUtc(T.addDays(s.day, 1), 0, shop.timezone);
-    const { data, error } = await sb.rpc('busy_times', { p_shop: C.shopId, p_from: from.toISOString(), p_to: to.toISOString() });
+    const { data, error } = await sb.rpc('busy_times', { p_shop: SHOP_ID, p_from: from.toISOString(), p_to: to.toISOString() });
     busy = error ? [] : data.map(r => ({ barber: r.barber_id, a: new Date(r.starts_at).getTime(), b: new Date(r.ends_at).getTime() }));
   }
 
@@ -144,7 +151,7 @@
     view.innerHTML = h + '</section>';
   }
 
-  let payOnline = false;
+  let payOnline = false, SHOP_ID = null;
   const errors = {
     slot_taken: 'That time just got taken. Go back and pick another.',
     outside_hours: 'That time is outside shop hours. Pick another.',
@@ -176,7 +183,7 @@
         let data = s.pendingId || null, error = null;
         if (!data) {
           ({ data, error } = await sb.rpc('create_booking', {
-            p_shop: C.shopId, p_service: s.svc, p_barber: s.barber, p_starts_at: T.toUtc(s.day, s.start, shop.timezone).toISOString(),
+            p_shop: SHOP_ID, p_service: s.svc, p_barber: s.barber, p_starts_at: T.toUtc(s.day, s.start, shop.timezone).toISOString(),
             p_client_name: s.name, p_client_phone: s.phone, p_client_email: s.email, p_cut_notes: s.notes,
           }));
           if (!error && payOnline) s.pendingId = data;

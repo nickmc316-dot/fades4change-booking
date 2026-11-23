@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="/styles.css">
 <style>
 .tabs{display:flex;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px;align-self:flex-start;flex-wrap:wrap}
 .tabs button{border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:7px 14px;border-radius:999px;cursor:pointer}
@@ -28,15 +28,15 @@
 <div class="app">
   <header class="top">
     <div class="brand"><div class="pole" aria-hidden="true"></div>
-      <div><h1>Fades 4 Change</h1><small id="who">Staff</small></div></div>
+      <div><h1 id="shop-name">Fades 4 Change</h1><small id="who">Staff</small></div></div>
     <button class="btn ghost" id="signout" hidden>Sign out</button>
   </header>
   <main id="view"><section class="panel"><div class="empty">Loading…</div></section></main>
-  <footer class="foot"><a href="index.html">Client booking page</a></footer>
+  <footer class="foot"><a id="book-link" href="/">Client booking page</a></footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js"></script>
+<script src="/config.js"></script>
 <script>
 (function () {
   const C = window.F4C_CONFIG, T = window.F4C_TIME;
@@ -50,6 +50,7 @@
 
   let shop, me, tab = 'schedule', day, authMode = 'signin', msg = '', err = '', openDetail = null;
   let services = [], adding = false, addErr = '';
+  let access = [], cur = null, SHOP_ID = null, locErr = '', locMsg = '';
   const ADD_ERRORS = {
     slot_taken: 'That barber already has someone at that time. Check the time, or cancel the other appointment first.',
     name_required: 'Add the client’s name.',
@@ -96,13 +97,41 @@
       }
     }
     if (e.target.id === 'profileform') { e.preventDefault(); await saveProfile(); }
+    if (e.target.id === 'addbarber') {
+      e.preventDefault();
+      const name = document.getElementById('nb-name').value.trim(), email = document.getElementById('nb-email').value.trim().toLowerCase();
+      err = ''; msg = '';
+      if (!name) err = 'Type the barber\u2019s name.';
+      else if (email && !/^\S+@\S+\.\S+$/.test(email)) err = 'That email doesn\u2019t look right.';
+      else {
+        const { error } = await sb.from('barbers').insert({ shop_id: SHOP_ID, name, email: email || null, role: 'barber' });
+        if (error) err = /duplicate|unique/i.test(error.message) ? 'Another barber here already has that email.' : 'Couldn\u2019t add the barber.';
+        else msg = name + ' added. They can create their login with that email.';
+      }
+      return render();
+    }
+    if (e.target.id === 'addloc') {
+      e.preventDefault();
+      const name = document.getElementById('nl-name').value.trim(), addr = document.getElementById('nl-addr').value.trim();
+      const slug = document.getElementById('nl-slug').value.trim().toLowerCase() || slugify(name);
+      locErr = ''; locMsg = '';
+      if (!name) { locErr = 'Type the shop name.'; return render(); }
+      const { data: newId, error } = await sb.rpc('create_location', { p_copy_from: SHOP_ID, p_name: name, p_address: addr, p_slug: slug });
+      if (error) {
+        locErr = /slug_taken/.test(error.message) ? 'That link name is taken. Try another.' : /bad_slug/.test(error.message) ? 'Link names use 3\u201340 lowercase letters, numbers and dashes.' : 'Couldn\u2019t add the location.';
+        return render();
+      }
+      access = (await sb.rpc('my_access')).data || access;
+      locMsg = '';
+      return openShop(access.find(a => a.shop_id === newId) || cur);
+    }
     if (e.target.id === 'payform') {
       e.preventDefault();
       const v = id => document.getElementById(id).value;
       payErr = ''; payMsg = '';
       const wantOn = document.getElementById('pay-on').checked;
       const { data: on, error } = await sb.rpc('set_payment_settings', {
-        p_shop: C.shopId, p_environment: v('pay-env'), p_merchant_id: v('pay-mid'), p_private_token: v('pay-token'),
+        p_shop: SHOP_ID, p_environment: v('pay-env'), p_merchant_id: v('pay-mid'), p_private_token: v('pay-token'),
         p_webhook_secret: v('pay-secret'), p_enabled: wantOn,
       });
       if (error) payErr = 'Couldn’t save. Try again.';
@@ -142,35 +171,55 @@
   async function startInner() {
     const { data: { session } } = await sb.auth.getSession();
     if (!session) return renderAuth();
-    const { data: barberId, error } = await sb.rpc('claim_barber_profile');
-    if (error || !barberId) {
-      document.getElementById('signout').hidden = false;
+    await sb.rpc('claim_access');
+    const { data: acc } = await sb.rpc('my_access');
+    access = acc || [];
+    document.getElementById('signout').hidden = false;
+    if (!access.length) {
       view.innerHTML = `<section class="panel"><h2>You're logged in, but not on the team list yet</h2>
-        <p class="hint" style="margin:0">Ask Danny to add <b>${esc(session.user.email)}</b> as your email in the app, then log in again.</p></section>`;
+        <p class="hint" style="margin:0">Ask the shop owner to add <b>${esc(session.user.email)}</b> as your email in the app, then log in again.</p></section>`;
       return;
     }
-    const [b, s] = await Promise.all([
-      sb.from('barbers').select('*').eq('id', barberId).single(),
-      sb.from('shops').select('*').eq('id', C.shopId).single(),
+    let pick = null;
+    try { pick = localStorage.getItem('f4c-staff-shop'); } catch (_) {}
+    await openShop(access.find(a => a.shop_id === pick) || access[0]);
+  }
+
+  // Switch the whole staff app to one location.
+  async function openShop(a) {
+    cur = a; SHOP_ID = a.shop_id;
+    try { localStorage.setItem('f4c-staff-shop', SHOP_ID); } catch (_) {}
+    const [s, b, v] = await Promise.all([
+      sb.from('shops').select('*').eq('id', SHOP_ID).single(),
+      a.barber_id ? sb.from('barbers').select('*').eq('id', a.barber_id).single() : Promise.resolve({ data: null }),
+      sb.from('services').select('*').eq('shop_id', SHOP_ID).eq('active', true).order('sort'),
     ]);
-    me = b.data; shop = s.data;
-    services = (await sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort')).data || [];
+    shop = s.data; services = v.data || [];
+    me = b.data || { id: null, name: 'Owner', role: 'owner', calendar_token: null };
     day = T.todayIn(shop.timezone);
-    document.getElementById('signout').hidden = false;
-    document.getElementById('who').textContent = me.name + (me.role === 'owner' ? ' · Owner' : '');
+    earnWeek = null; adding = false; kioskLink = ''; err = ''; msg = '';
+    if (tab === 'profile' && !me.id) tab = 'schedule';
+    if (tab === 'locations' && cur.role !== 'org_owner') tab = 'schedule';
+    document.getElementById('shop-name').textContent = shop.name;
+    document.getElementById('book-link').href = F4C_SHOP.bookUrl(shop.slug);
+    const roleLabel = { org_owner: 'Owner', owner: 'Owner', barber: 'Barber' }[cur.role];
+    document.getElementById('who').textContent = (me.id ? me.name + ' · ' : '') + roleLabel + (access.length > 1 ? ' · ' + cur.org_name : '');
     render();
   }
 
   // ── Views ─────────────────────────────────────────────────────────────
-  const owner = () => me.role === 'owner';
+  const owner = () => cur && cur.role !== 'barber';
   function tabs() {
-    const t = [['schedule', 'Schedule'], ['earnings', 'Earnings'], ['rent', 'Booth rent'], ['profile', 'My profile']];
+    const t = [['schedule', 'Schedule'], ['earnings', 'Earnings'], ['rent', 'Booth rent']];
+    if (me.id) t.push(['profile', 'My profile']);
     if (owner()) t.push(['team', 'Team']);
-    return `<div class="tabs" role="group" aria-label="Sections">${t.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`;
+    if (cur.role === 'org_owner') t.push(['locations', 'Locations']);
+    const switcher = access.length > 1 ? `<div class="field" style="max-width:360px"><label for="shop-switch">Location</label><select id="shop-switch">${access.map(a => `<option value="${a.shop_id}" ${a.shop_id === SHOP_ID ? 'selected' : ''}>${esc(a.shop_name)}</option>`).join('')}</select></div>` : '';
+    return switcher + `<div class="tabs" role="group" aria-label="Sections">${t.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`;
   }
   async function render() {
     err = err || '';
-    const body = await ({ schedule: schedule, earnings: earnings, rent: rent, profile: profile, team: team }[tab])();
+    const body = await ({ schedule: schedule, earnings: earnings, rent: rent, profile: profile, team: team, locations: locations }[tab])();
     view.innerHTML = tabs() + body;
   }
 
@@ -179,8 +228,8 @@
   async function schedule() {
     const from = T.toUtc(day, 0, shop.timezone).toISOString(), to = T.toUtc(T.addDays(day, 1), 0, shop.timezone).toISOString();
     const [{ data: list, error }, { data: team }] = await Promise.all([
-      sb.from('bookings').select('*, services(name, minutes, price_cents)').gte('starts_at', from).lt('starts_at', to).order('starts_at'),
-      owner() ? sb.from('barbers').select('id, name') : Promise.resolve({ data: [me] }),
+      sb.from('bookings').select('*, services(name, minutes, price_cents)').eq('shop_id', SHOP_ID).gte('starts_at', from).lt('starts_at', to).order('starts_at'),
+      owner() ? sb.from('barbers').select('id, name').eq('shop_id', SHOP_ID).eq('active', true) : Promise.resolve({ data: [me] }),
     ]);
     if (error) return '<section class="panel"><div class="error">Couldn’t load the schedule. Refresh to try again.</div></section>';
     const names = Object.fromEntries((team || []).map(x => [x.id, x.name]));
@@ -241,7 +290,7 @@
 
   async function rent() {
     const today = T.todayIn(shop.timezone), thisWeek = T.weekStart(today), lastWeek = T.addDays(thisWeek, -7);
-    const [a, b] = await Promise.all([lastWeek, thisWeek].map(w => sb.rpc('rent_statement', { p_shop: C.shopId, p_week_start: w })));
+    const [a, b] = await Promise.all([lastWeek, thisWeek].map(w => sb.rpc('rent_statement', { p_shop: SHOP_ID, p_week_start: w })));
     if (a.error || b.error) return '<section class="panel"><div class="error">Couldn’t load statements. Refresh to try again.</div></section>';
     const block = (w, rows) => {
       const isLast = w === lastWeek;
@@ -311,6 +360,7 @@
   async function fetchBookings(fromDay, toDay) {
     const { data, error } = await sb.from('bookings')
       .select('starts_at, barber_id, client_name, status, source, deposit_cents, deposit_paid, services(name, price_cents)')
+      .eq('shop_id', SHOP_ID)
       .gte('starts_at', T.toUtc(fromDay, 0, shop.timezone).toISOString())
       .lt('starts_at', T.toUtc(toDay, 0, shop.timezone).toISOString())
       .order('starts_at');
@@ -319,7 +369,7 @@
   }
   async function teamNames() {
     if (!owner()) return { [me.id]: me.name };
-    const { data } = await sb.from('barbers').select('id, name');
+    const { data } = await sb.from('barbers').select('id, name').eq('shop_id', SHOP_ID);
     return Object.fromEntries((data || []).map(x => [x.id, x.name]));
   }
   async function earnings() {
@@ -329,7 +379,7 @@
     let rows, names, rent;
     try {
       [rows, names, rent] = await Promise.all([fetchBookings(earnWeek, end), teamNames(),
-        sb.rpc('rent_statement', { p_shop: C.shopId, p_week_start: earnWeek }).then(r => r.data || [])]);
+        sb.rpc('rent_statement', { p_shop: SHOP_ID, p_week_start: earnWeek }).then(r => r.data || [])]);
     } catch (_) { return '<section class="panel"><div class="error">Couldn’t load earnings. Refresh to try again.</div></section>'; }
     const per = {};
     for (const id of Object.keys(names)) per[id] = { done: 0, services: 0, noshow: 0, upcoming: 0, deposits: 0 };
@@ -395,7 +445,7 @@
 
   const WEBHOOK_URL = `${C.supabaseUrl}/functions/v1/clover-webhook`;
   async function paymentsPanel() {
-    const { data } = await sb.rpc('payment_status', { p_shop: C.shopId });
+    const { data } = await sb.rpc('payment_status', { p_shop: SHOP_ID });
     const p = (data && data[0]) || { environment: 'sandbox', merchant_id_hint: null, has_token: false, has_webhook_secret: false, enabled: false };
     const saved = v => v ? '<span class="chip ok">Saved</span>' : '<span class="chip warn">Not saved yet</span>';
     return `<section class="panel">
@@ -420,7 +470,7 @@
   let payErr = '', payMsg = '';
 
   async function team() {
-    const { data, error } = await sb.from('barbers').select('*').order('role', { ascending: false }).order('name');
+    const { data, error } = await sb.from('barbers').select('*').eq('shop_id', SHOP_ID).order('role', { ascending: false }).order('name');
     if (error) return '<section class="panel"><div class="error">Couldn’t load the team.</div></section>';
     return (await paymentsPanel()) + `<section class="panel">
       <div><div class="label">Owner only</div><h2>Team</h2><p class="hint" style="margin:4px 0 0">Add each barber’s email here. When they create an account with that email, it links to their chair automatically.</p></div>
@@ -429,6 +479,11 @@
         <td><div class="row" style="flex-wrap:nowrap"><input id="em-${b.id}" type="email" value="${esc(b.email)}" placeholder="barber@email.com" style="min-width:180px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"><span class="mini" style="margin:0"><button data-saveemail="${b.id}">Save</button></span></div></td>
         <td>${b.phone ? esc(b.phone) : '<span class="hint">—</span>'}<br><span class="hint">${b.carrier ? CARRIERS[b.carrier] : 'No carrier yet'}</span></td></tr>`).join('')}
       </tbody></table></div>
+      <form id="addbarber" class="row" novalidate style="align-items:flex-end">
+        <div class="field" style="flex:1;min-width:150px"><label for="nb-name">New barber name</label><input id="nb-name" maxlength="80" autocomplete="off"></div>
+        <div class="field" style="flex:1;min-width:180px"><label for="nb-email">Their email (optional)</label><input id="nb-email" type="email" autocomplete="off"></div>
+        <button class="btn ghost" type="submit">Add barber</button>
+      </form>
       <div class="error" role="alert">${esc(err)}</div><div class="ok-msg" role="status">${esc(msg)}</div>
     </section>
     <section class="panel">
@@ -442,6 +497,33 @@
   }
   let kioskLink = '';
 
+  // ── Locations (organization owners) ──────────────────────────────────
+  async function locations() {
+    const mine = access.filter(a => a.org_id === cur.org_id);
+    const origin = location.origin;
+    return `<section class="panel">
+      <div><div class="label">${esc(cur.org_name)}</div><h2>Locations</h2>
+        <p class="hint" style="margin:4px 0 0">Each location has its own booking link, walk-in tablet, barbers, schedule, booth rent and Clover account. Switch between them with the Location menu at the top.</p></div>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Location</th><th>Booking link</th><th>Walk-in tablet page</th></tr></thead><tbody>
+      ${mine.map(a => `<tr><td><b>${esc(a.shop_name)}</b>${a.shop_id === SHOP_ID ? '<br><span class="hint">Open now</span>' : `<br><span class="mini" style="margin:4px 0 0"><button data-openshop="${a.shop_id}">Open</button></span>`}</td>
+        <td><span class="hint">${esc(origin + F4C_SHOP.bookUrl(a.slug))}</span></td><td><span class="hint">${esc(origin + F4C_SHOP.walkinUrl(a.slug))}</span></td></tr>`).join('')}
+      </tbody></table></div>
+    </section>
+    <section class="panel">
+      <div><div class="label">Grow</div><h2>Add a location</h2>
+        <p class="hint" style="margin:4px 0 0">Starts with the same hours, services, prices, deposit and booth rent as <b>${esc(shop.name)}</b>. Add its barbers on its Team tab afterwards.</p></div>
+      <form id="addloc" class="list" novalidate>
+        <div class="field"><label for="nl-name">Shop name</label><input id="nl-name" maxlength="120" autocomplete="off" placeholder="e.g. Fades 4 Change Greer"></div>
+        <div class="field"><label for="nl-addr">Address</label><input id="nl-addr" maxlength="200" autocomplete="off"></div>
+        <div class="field"><label for="nl-slug">Link name</label><input id="nl-slug" maxlength="40" autocomplete="off" placeholder="e.g. f4c-greer">
+          <span class="hint">Lowercase letters, numbers and dashes. Booking link becomes ${esc(origin)}/s/<b>link-name</b></span></div>
+        <div class="error" role="alert">${esc(locErr)}</div><div class="ok-msg" role="status">${esc(locMsg)}</div>
+        <button class="btn primary" type="submit">Add location</button>
+      </form>
+    </section>`;
+  }
+  const slugify = v => v.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
   // ── Actions ───────────────────────────────────────────────────────────
   view.addEventListener('click', async e => {
     const t = e.target.closest('button'); if (!t || (t.type === 'submit' && t.form)) return; const d = t.dataset;
@@ -453,6 +535,7 @@
       err = ''; msg = 'If that email is on the team, a reset link is on its way.'; return renderAuth();
     }
     err = ''; msg = '';
+    if (d.openshop) { const a = access.find(x => x.shop_id === d.openshop); if (a) return openShop(a); return; }
     if ('addopen' in d) { adding = true; addErr = ''; }
     else if ('addclose' in d) { adding = false; addErr = ''; }
     else if (d.tab) { tab = d.tab; adding = false; }
@@ -474,10 +557,10 @@
       else { const { data, error } = await sb.from('shops').update({ weekly_rent_cents: v }).eq('id', shop.id).select().single(); if (error) err = 'Couldn’t save rent.'; else { shop = data; msg = 'Rent saved.'; } }
     }
     else if (d.kiosk) {
-      const { data: tok, error } = await sb.rpc('get_kiosk_token', { p_shop: C.shopId, p_reset: d.kiosk === 'reset' });
+      const { data: tok, error } = await sb.rpc('get_kiosk_token', { p_shop: SHOP_ID, p_reset: d.kiosk === 'reset' });
       if (error) err = 'Couldn’t set up the tablet. Try again.';
-      else if (d.kiosk === 'here') { location.href = 'walkin.html?kiosk=' + encodeURIComponent(tok); return; }
-      else if (d.kiosk === 'link') kioskLink = new URL('walkin.html?kiosk=' + encodeURIComponent(tok), location.href).href;
+      else if (d.kiosk === 'here') { location.href = F4C_SHOP.walkinUrl(shop.slug) + '?kiosk=' + encodeURIComponent(tok); return; }
+      else if (d.kiosk === 'link') kioskLink = new URL(F4C_SHOP.walkinUrl(shop.slug) + '?kiosk=' + encodeURIComponent(tok), location.href).href;
       else { kioskLink = ''; msg = 'All walk-in tablets are turned off. Set up the tablet again to turn it back on.'; }
     }
     else if ('copyhook' in d) {
@@ -505,7 +588,11 @@
     render();
   });
 
-  document.getElementById('signout').onclick = async () => { await sb.auth.signOut(); me = null; tab = 'schedule'; authMode = 'signin'; renderAuth(); };
+  document.getElementById('signout').onclick = async () => { await sb.auth.signOut(); me = null; cur = null; access = []; tab = 'schedule'; authMode = 'signin'; renderAuth(); };
+  view.addEventListener('change', e => {
+    if (e.target.id === 'shop-switch') { const a = access.find(x => x.shop_id === e.target.value); if (a) openShop(a); }
+    if (e.target.id === 'nl-name') { const sl = document.getElementById('nl-slug'); if (sl && !sl.value) sl.value = slugify(e.target.value); }
+  });
   sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_IN' && !me) start(); });
   start();
 })();

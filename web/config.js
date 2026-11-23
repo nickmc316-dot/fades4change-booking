@@ -3,7 +3,23 @@
 window.F4C_CONFIG = {
   supabaseUrl: 'https://ebhxsaiihvdvcbjagxqv.supabase.co',
   supabaseKey: 'sb_publishable_tZXMM5yPhBtoyUgRrG5Low_2bremEtp',
-  shopId: '06efc15d-cee1-4954-8751-fb34d5452e35',
+  // The shop a bare link (fades4change.vercel.app) opens. Other shops use /s/<slug>.
+  defaultSlug: 'fades4change',
+};
+
+// Which shop a public page is for: /s/<slug>, ?s=<slug>, or the default shop.
+window.F4C_SHOP = {
+  slug() {
+    const m = location.pathname.match(/^\/s\/([a-z0-9-]+)/);
+    const q = new URLSearchParams(location.search).get('s');
+    return (m && m[1]) || (q && /^[a-z0-9-]+$/.test(q) ? q : null) || window.F4C_CONFIG.defaultSlug;
+  },
+  async load(sb, slug) {
+    const { data, error } = await sb.from('shops').select('*').eq('slug', slug || this.slug()).maybeSingle();
+    return error ? null : data;
+  },
+  bookUrl(slug) { return slug === window.F4C_CONFIG.defaultSlug ? '/' : '/s/' + slug; },
+  walkinUrl(slug) { return slug === window.F4C_CONFIG.defaultSlug ? '/walkin.html' : '/s/' + slug + '/walkin'; },
 };
 
 // Shop-local time helpers (the shop runs on its own time zone, whatever the visitor's is).

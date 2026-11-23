@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="/styles.css">
 <style>
 .app{max-width:760px}
 body{font-size:17px}
@@ -34,15 +34,15 @@ h2{font-size:30px}
 <div class="app">
   <header class="top">
     <div class="brand"><div class="pole" aria-hidden="true"></div>
-      <div><h1>Fades 4 Change</h1><small>Walk-ins welcome</small></div></div>
+      <div><h1 id="shop-name">Fades 4 Change</h1><small>Walk-ins welcome</small></div></div>
     <div class="clock" id="clock"></div>
   </header>
   <main id="view"><section class="panel"><div class="empty">Loading today's chairs…</div></section></main>
-  <footer class="foot" id="foot"><a href="index.html">Book ahead online</a></footer>
+  <footer class="foot" id="foot"><a id="book-link" href="/">Book ahead online</a></footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js"></script>
+<script src="/config.js"></script>
 <script>
 (function () {
   const C = window.F4C_CONFIG, T = window.F4C_TIME;
@@ -59,12 +59,11 @@ h2{font-size:30px}
   let token = null;
   try {
     const q = new URLSearchParams(location.search).get('kiosk');
-    if (q) { localStorage.setItem(KEY, q); history.replaceState(null, '', location.pathname); }
-    token = localStorage.getItem(KEY);
+    if (q) { localStorage.setItem(KEY + ':' + F4C_SHOP.slug(), q); history.replaceState(null, '', location.pathname); }
   } catch (_) {}
   let kiosk = false;
 
-  let shop, services = [], barbers = [], busy = [];
+  let shop, services = [], barbers = [], busy = [], SHOP_ID = null;
   let s = fresh();
   function fresh() { return { step: 0, svc: null, barber: null, start: null, name: '', error: '', result: null }; }
 
@@ -76,7 +75,7 @@ h2{font-size:30px}
   const today = () => T.todayIn(shop.timezone);
   async function loadBusy() {
     const d = today();
-    const { data } = await sb.rpc('busy_times', { p_shop: C.shopId,
+    const { data } = await sb.rpc('busy_times', { p_shop: SHOP_ID,
       p_from: T.toUtc(d, 0, shop.timezone).toISOString(), p_to: T.toUtc(T.addDays(d, 1), 0, shop.timezone).toISOString() });
     busy = (data || []).map(r => ({ barber: r.barber_id, a: +new Date(r.starts_at), b: +new Date(r.ends_at) }));
   }
@@ -94,14 +93,20 @@ h2{font-size:30px}
   const defaultLen = () => Math.max(...services.map(x => x.minutes), 30);
 
   async function init() {
+    const found = await F4C_SHOP.load(sb);
+    if (!found) { view.innerHTML = '<section class="panel"><div class="empty">We couldn\u2019t find that shop.</div></section>'; return; }
+    SHOP_ID = found.id;
+    document.getElementById('shop-name').textContent = found.name;
+    document.getElementById('book-link').href = F4C_SHOP.bookUrl(found.slug);
+    try { token = localStorage.getItem(KEY + ':' + found.slug) || (found.slug === C.defaultSlug ? localStorage.getItem(KEY) : null); } catch (_) {}
     const [a, b, c] = await Promise.all([
-      sb.from('shops').select('*').eq('id', C.shopId).single(),
-      sb.from('services').select('*').eq('shop_id', C.shopId).eq('active', true).order('sort'),
-      sb.rpc('public_barbers', { p_shop: C.shopId }),
+      Promise.resolve({ data: found, error: null }),
+      sb.from('services').select('*').eq('shop_id', SHOP_ID).eq('active', true).order('sort'),
+      sb.rpc('public_barbers', { p_shop: SHOP_ID }),
     ]);
     if (a.error || b.error || c.error) { view.innerHTML = '<section class="panel"><div class="empty">Check-in is down right now. Please see the front desk.</div></section>'; return; }
     shop = a.data; services = b.data; barbers = c.data;
-    if (token) { const r = await sb.rpc('kiosk_ok', { p_shop: C.shopId, p_token: token }); kiosk = !!r.data; }
+    if (token) { const r = await sb.rpc('kiosk_ok', { p_shop: SHOP_ID, p_token: token }); kiosk = !!r.data; }
     if (kiosk) document.getElementById('foot').hidden = true;
     await loadBusy();
     render();
@@ -127,7 +132,7 @@ h2{font-size:30px}
     if (s.step === 0) {
       h += `<div><h2>Walk in? Check in here.</h2><p class="lead">Here's who's open today. No deposit for walk-ins.</p></div>${board()}` +
         (kiosk ? `<button class="btn primary" data-start>Check in</button>`
-               : `<div class="note">Walk-in check-in works on the tablet inside the shop. Want a time now? <a href="index.html">Book ahead online.</a></div>`);
+               : `<div class="note">Walk-in check-in works on the tablet inside the shop. Want a time now? <a href="${F4C_SHOP.bookUrl(shop.slug)}">Book ahead online.</a></div>`);
     } else if (s.step === 1) {
       h += `<div><div class="label">Step 1 of 4</div><h2>What are we doing?</h2></div><div class="list">` +
         services.map(x => `<button class="opt" data-svc="${x.id}"><span><b>${esc(x.name)}</b><br><span class="sub">${x.minutes} min</span></span><span class="price">${money(x.price_cents)}</span></button>`).join('') +
@@ -196,7 +201,7 @@ h2{font-size:30px}
     else if ('checkin' in d) {
       if (!s.name.trim()) { s.error = ERR.name_required; return render(); }
       t.disabled = true; t.textContent = 'Checking you in…';
-      const { data, error } = await sb.rpc('create_walkin', { p_shop: C.shopId, p_token: token, p_service: s.svc, p_barber: s.barber,
+      const { data, error } = await sb.rpc('create_walkin', { p_shop: SHOP_ID, p_token: token, p_service: s.svc, p_barber: s.barber,
         p_starts_at: T.toUtc(today(), s.start, shop.timezone).toISOString(), p_client_name: s.name });
       if (error) {
         const code = Object.keys(ERR).find(k => (error.message || '').includes(k));
